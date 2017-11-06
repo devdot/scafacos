@@ -8,6 +8,8 @@ else
 lib_LTLIBRARIES += libfcs_near.la
 endif
 
+AM_LDFLAGS = -lOpenCL
+
 sl_sub_libs = libfcs_near_near___.la libfcs_near_near__p.la libfcs_near_near_f_.la libfcs_near_near_fp.la libfcs_near_extra.la libfcs_near_mpiwrap.la
 
 noinst_LTLIBRARIES += $(sl_sub_libs)
