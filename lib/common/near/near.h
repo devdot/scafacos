@@ -48,6 +48,9 @@ typedef fcs_gridsort_resort_t fcs_near_resort_t;
 #define FCS_NEAR_RESORT_NULL  FCS_GRIDSORT_RESORT_NULL
 
 
+struct _fcs_near_compute_context_t;
+
+
 /**
  * @brief near field solver object structure
  */
@@ -79,6 +82,8 @@ typedef struct _fcs_near_t
 
   fcs_int resort;
   fcs_gridsort_resort_t gridsort_resort;
+
+  struct _fcs_near_compute_context_t *context;
 
 } fcs_near_t;
 
@@ -205,10 +210,25 @@ void fcs_near_set_resort(fcs_near_t *near, fcs_int resort);
  * @param comm MPI_Comm MPI communicator to use, has to be Cartesian if periodicity was not set with fcs_near_set_system
  * @return fcs_int zero if successful, otherwise less than zero
  */
-fcs_int fcs_near_compute(fcs_near_t *near,
-                         fcs_float cutoff,
-                         const void *compute_param,
-                         MPI_Comm comm);
+fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm);
+
+/**
+ * @brief asynchronous compute near field interactions with the given "gridsorted" particles,
+ * particle values (positions, charges, field, potentials and gridsort-indices) get rearranged!
+ * @param near fcs_near_t* near field solver object
+ * @param cutoff fcs_float cutoff range
+ * @param compute_param void* parameter for field and/or potential functions
+ * @param comm MPI_Comm MPI communicator to use, has to be Cartesian if periodicity was not set with fcs_near_set_system
+ * @return fcs_int zero if successful, otherwise less than zero
+ */
+fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm);
+
+/**
+ * @brief wait for finish of asynchronous compute
+ * @param near fcs_near_t* near field solver object
+ * @return fcs_int zero if successful, otherwise less than zero
+ */
+fcs_int fcs_near_compute_join(fcs_near_t *near);
 
 /**
  * @brief create near_resort object from given near field solver object
