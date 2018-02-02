@@ -1,5 +1,6 @@
 /*
   Copyright (C) 2011, 2012, 2013 Olaf Lenz, Rene Halver, Michael Hofmann
+  Copyright (C) 2018 Michael Hofmann
   
   This file is part of ScaFaCoS.
   
