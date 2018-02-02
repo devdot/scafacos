@@ -1,5 +1,6 @@
 /*
   Copyright (C) 2011, 2012, 2013 Olaf Lenz, Rene Halver, Michael Hofmann
+  Copyright (C) 2017 Dirk Leichsenring
   Copyright (C) 2018 Michael Hofmann
   
   This file is part of ScaFaCoS.
@@ -47,7 +48,8 @@
 #include "z_tools.h"
 #include "near.h"
 
-#define FCS_ENABLE_OPENCL  1
+#define FCS_ENABLE_OPENCL      1
+#define FCS_ENABLE_OPENCL_CPU  1
 
 
 #if FCS_ENABLE_OPENCL
@@ -694,7 +696,13 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl)
   ret = CL_DEVICE_NOT_FOUND;
   int d = 0;
   do {
-    ret = clGetDeviceIDs(platform_ids[d], CL_DEVICE_TYPE_GPU, 1, &ocl->device_id, &ret_num_devices);
+    ret = clGetDeviceIDs(platform_ids[d],
+#if FCS_ENABLE_OPENCL_CPU
+      CL_DEVICE_TYPE_CPU,
+#else
+      CL_DEVICE_TYPE_GPU,
+#endif
+      1, &ocl->device_id, &ret_num_devices);
     ++d;
     
   } while (ret != CL_SUCCESS && d < ret_num_platforms);
@@ -743,7 +751,7 @@ static fcs_int fcs_ocl_compute_near(fcs_ocl_context_t *ocl, fcs_float *positions
  /*  OpenCL Kernel  */
 const char *program_source[] = {
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
-  "__kernel void cal_potential( double cut, __global double *positions, __global double *charges, __global double *fields, __global double *pots, __global int *boxes, __global int *linked,__global int *linkedback, int size)\n"
+  "__kernel void cal_potential(double cut, __global double *positions, __global double *charges, __global double *fields, __global double *pots, __global int *boxes, __global int *linked,__global int *linkedback, int size)\n"
   "{\n"
   "  double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
   "  double icut = 1/cut;  \n"
@@ -819,19 +827,25 @@ const char *program_source[] = {
   "        }  \n"
   "      }    \n"
   "    }\n"
-  "  \n"
   "    fields[(3*a)]=fields[(3*a)]+fergx;\n"
   "    fields[3*a+1]=fields[((3*a)+1)]+fergy;\n"
   "    fields[3*a+2]=fields[((3*a)+2)]+fergz;\n"
-  "        pots[a]=pots[a] + erg;\n"
+  "    pots[a]=pots[a] + erg;\n"
   "  }\n"
   "}\n"
   };
   /*  Programm erstellen  */
   program = clCreateProgramWithSource(ocl->context, sizeof(program_source)/sizeof(*program_source), program_source, NULL, &ret);  
   ret = clBuildProgram(program, 1, &ocl->device_id, NULL, NULL, NULL);
+  if (ret != CL_SUCCESS)
+  {
+    size_t length;
+    char buffer[2048];
+    clGetProgramBuildInfo(program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    printf("clGetProgramBuildInfo: %s\n", buffer);
+  }
   kernel = clCreateKernel(program, "cal_potential", &ret);
-     
+
   /*  Parameter uebergeben  */
   CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cutoff), &cutoff));
   CL_CHECK(clSetKernelArg(kernel, 1, sizeof(input_positions), &input_positions));
@@ -1192,8 +1206,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   int * boxlisttmp = malloc( 2 * near->nparticles * sizeof(int));
 
   do {
-    current_box = real_boxes[current_last];
-    find_box(real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
+    current_box = near->context->real_boxes[current_last];
+    find_box(near->context->real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
     boxlisttmp[2*currentboxid]=current_start;
     boxlisttmp[2*currentboxid+1]=current_size;
     indexlist[current_start]=currentboxid;
@@ -1220,8 +1234,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   }
 
   for (i = 0; i < currentboxid; i++) {
-    current_box = real_boxes[boxlist[4*i]];  
-    find_neighbours(nreal_neighbours, real_neighbours, real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
+    current_box = near->context->real_boxes[boxlist[4*i]];  
+    find_neighbours(nreal_neighbours, real_neighbours, near->context->real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
     for (j=0; j<13;j++) {
       if (real_sizes[j]>0) {
         linkedboxes[(13*i)+boxlist[4*i+2]]=indexlist[real_starts[j]];
@@ -1239,15 +1253,15 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   free(linkedboxes);
   free(linkedboxesback);
 
-  if (ghost_boxes) {
+  if (near->context->ghost_boxes) {
     int gbid=0;
     int * ghostindexlist = malloc(near->nghosts * sizeof(int));
     int * ghostboxlisttmp = malloc( 2 * near->nghosts * sizeof(int));
     int * glinked = malloc (2 * currentboxid * sizeof(int));
     current_last=0;
     do {
-      current_box = ghost_boxes[current_last];
-          find_box(ghost_boxes, near->nghosts, current_box, current_last, &current_start, &current_size);
+      current_box = near->context->ghost_boxes[current_last];
+      find_box(near->context->ghost_boxes, near->nghosts, current_box, current_last, &current_start, &current_size);
       ghostboxlisttmp[2*gbid]=current_start;
       ghostboxlisttmp[2*gbid+1]=current_size;
       ghostindexlist[current_start]=gbid;
@@ -1270,8 +1284,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
       glinked[2*i+1]=0;
     }
     for (i = 0; i < currentboxid; i++) {
-      current_box = real_boxes[boxlist[4*i]];  
-      find_neighbours(nghost_neighbours, ghost_neighbours, ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
+      current_box = near->context->real_boxes[boxlist[4*i]];  
+      find_neighbours(nghost_neighbours, ghost_neighbours, near->context->ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
       for (j=0; j<27;j++) {
         if (ghost_sizes[j]>0) {
           ghostlinkedboxes[(27*i)+glinked[2*i]]=ghostindexlist[ghost_starts[j]];
