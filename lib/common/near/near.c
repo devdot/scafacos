@@ -1041,6 +1041,10 @@ typedef struct _fcs_near_compute_context_t
   pthread_t thread;
 #endif
 
+#if FCS_ENABLE_OPENCL
+  fcs_ocl_context_t ocl;
+#endif /* FCS_ENABLE_OPENCL */
+
 #ifdef DO_TIMING
   double t[7];
 #endif
@@ -1100,6 +1104,10 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 
   if ((near->compute_field_potential && near->compute_field_potential_3diff) || ((near->compute_field || near->compute_potential) && (near->compute_field_3diff || near->compute_potential_3diff)))
     return -2;
+
+#if FCS_ENABLE_OPENCL
+  fcs_ocl_init(&near->context->ocl);
+#endif /* FCS_ENABLE_OPENCL */
 
   INFO_CMD(
     if (comm_rank == 0)
@@ -1176,8 +1184,6 @@ static void *near_compute_main(void *arg)
 
 #if FCS_ENABLE_OPENCL
 
-  fcs_ocl_context_t ocl;
-
   /*  Hilfsarrays erstellen  */
   current_last=0;
   int * indexlist = malloc(near->nparticles * sizeof(int));
@@ -1228,9 +1234,7 @@ static void *near_compute_main(void *arg)
   }
   free(indexlist);
 
-  fcs_ocl_init(&ocl);
-
-  fcs_ocl_compute_near(&ocl, near->positions, near->charges, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,linkedboxes,linkedboxesback,currentboxid); 
+  fcs_ocl_compute_near(&near->context->ocl, near->positions, near->charges, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,linkedboxes,linkedboxesback,currentboxid); 
 
   free(linkedboxes);
   free(linkedboxesback);
@@ -1278,12 +1282,10 @@ static void *near_compute_main(void *arg)
     }
     free(ghostindexlist);
 
-    fcs_ocl_compute_near_ghost(&ocl, near->positions, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,currentboxid, near->ghost_positions, near->ghost_charges,ghostboxlist,glinked,ghostlinkedboxes, near->nghosts, gbid);
+    fcs_ocl_compute_near_ghost(&near->context->ocl, near->positions, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,currentboxid, near->ghost_positions, near->ghost_charges,ghostboxlist,glinked,ghostlinkedboxes, near->nghosts, gbid);
 
     free(ghostlinkedboxes);
   }
-
-  fcs_ocl_release(&ocl);
 
 #else /* FCS_ENABLE_OPENCL */
 
@@ -1384,6 +1386,10 @@ static fcs_int near_compute_free(fcs_near_t *near)
 #ifdef DO_TIMING
   double *t = near->context->t;
 #endif
+
+#if FCS_ENABLE_OPENCL
+  fcs_ocl_release(&near->context->ocl);
+#endif /* FCS_ENABLE_OPENCL */
 
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[0]);
 
