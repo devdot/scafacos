@@ -22,11 +22,17 @@
 # include <config.h>
 #endif
 
+#define FCS_NEAR_ENABLE_ASYNC  1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 
 #include <mpi.h>
+
+#if FCS_NEAR_ENABLE_ASYNC
+# include <pthread.h>
+#endif
 
 #include "common/fcs-common/FCSCommon.h"
 
@@ -192,6 +198,8 @@ static fcs_int ghost_neighbours[] = {
    0,  1,  1,
    1,  1,  1, };
 static fcs_int nghost_neighbours = sizeof(ghost_neighbours) / 3 / sizeof(fcs_int);
+
+#define max_nboxes  27
 
 #define box_fmt       "%lld,%lld,%lld (%lld)"
 #define box_val(_b_)  BOX_GET_X(_b_, 0), BOX_GET_X(_b_, 1), BOX_GET_X(_b_, 2), (_b_)
@@ -1021,53 +1029,73 @@ static void compute_near(fcs_float *positions0, fcs_float *charges0, fcs_float *
 #endif /* FCS_ENABLE_OPENCL */
 
 
-fcs_int fcs_near_compute(fcs_near_t *near,
-                         fcs_float cutoff,
-                         const void *compute_param,
-                         MPI_Comm comm)
+typedef struct _fcs_near_compute_context_t
 {
-  int comm_size, comm_rank;
+  fcs_float cutoff;
+  const void *compute_param;
+  MPI_Comm comm;
 
-  fcs_int i;
-
-  box_t *real_boxes, *ghost_boxes, current_box;
-  const fcs_int max_nboxes = 27;
-  fcs_int current_last, current_start, current_size;
-  fcs_int real_lasts[max_nboxes], real_starts[max_nboxes], real_sizes[max_nboxes];
-  fcs_int ghost_lasts[max_nboxes], ghost_starts[max_nboxes], ghost_sizes[max_nboxes];
-  fcs_int periodicity[3];
-  int cart_dims[3], cart_periods[3], cart_coords[3], topo_status;
-
-#ifdef DO_TIMING
-  double _t, t[7] = { 0, 0, 0, 0, 0, 0, 0 };
+  fcs_int running;
+#if FCS_NEAR_ENABLE_ASYNC
+  fcs_int async;
+  pthread_t thread;
 #endif
 
+#ifdef DO_TIMING
+  double t[7];
+#endif
 
-  TIMING_SYNC(comm); TIMING_START(t[0]);
+  int comm_size, comm_rank;
 
-  MPI_Comm_size(comm, &comm_size);
-  MPI_Comm_rank(comm, &comm_rank);
+  fcs_int periodicity[3];
 
-  if (cutoff <= 0) goto exit;
+} fcs_near_compute_context_t;
 
-  MPI_Topo_test(comm, &topo_status);
+
+static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
+{
+  int cart_dims[3], cart_periods[3], cart_coords[3], topo_status;
+
+  near->context = malloc(sizeof(fcs_near_compute_context_t));
+
+  near->context->cutoff = cutoff;
+  near->context->compute_param = compute_param;
+  near->context->comm = comm;
+
+  near->context->running = 0;
+
+#ifdef DO_TIMING
+  double *t = near->context->t;
+
+  fcs_int i;
+  for (i = 0; i < sizeof(near->context->t) / sizeof(near->context->t[0]); ++i) t[i] = 0;
+#endif
+
+  TIMING_SYNC(near->context->comm); TIMING_START(t[0]);
+
+  MPI_Comm_size(near->context->comm, &near->context->comm_size);
+  MPI_Comm_rank(near->context->comm, &near->context->comm_rank);
+
+  if (cutoff <= 0) return 1;
+
+  MPI_Topo_test(near->context->comm, &topo_status);
 
   if (near->periodicity[0] < 0 || near->periodicity[1] < 0 || near->periodicity[2] < 0)
   {
     if (topo_status == MPI_CART)
     {
       MPI_Cart_get(comm, 3, cart_dims, cart_periods, cart_coords);
-      periodicity[0] = cart_periods[0];
-      periodicity[1] = cart_periods[1];
-      periodicity[2] = cart_periods[2];
+      near->context->periodicity[0] = cart_periods[0];
+      near->context->periodicity[1] = cart_periods[1];
+      near->context->periodicity[2] = cart_periods[2];
 
     } else return -1;
 
   } else
   {
-    periodicity[0] = near->periodicity[0];
-    periodicity[1] = near->periodicity[1];
-    periodicity[2] = near->periodicity[2];
+    near->context->periodicity[0] = near->periodicity[0];
+    near->context->periodicity[1] = near->periodicity[1];
+    near->context->periodicity[2] = near->periodicity[2];
   }
 
   if ((near->compute_field_potential && near->compute_field_potential_3diff) || ((near->compute_field || near->compute_potential) && (near->compute_field_3diff || near->compute_potential_3diff)))
@@ -1082,42 +1110,60 @@ fcs_int fcs_near_compute(fcs_near_t *near,
         near->box_a[0], near->box_a[1], near->box_a[2],
         near->box_b[0], near->box_b[1], near->box_b[2],
         near->box_c[0], near->box_c[1], near->box_c[2]);
-      printf(INFO_PRINT_PREFIX "  periodicity: [%" FCS_LMOD_INT "d, %" FCS_LMOD_INT "d, %" FCS_LMOD_INT "d]\n", periodicity[0], periodicity[1], periodicity[2]);
+      printf(INFO_PRINT_PREFIX "  periodicity: [%" FCS_LMOD_INT "d, %" FCS_LMOD_INT "d, %" FCS_LMOD_INT "d]\n", near->context->periodicity[0], near->context->periodicity[1], near->context->periodicity[2]);
       printf(INFO_PRINT_PREFIX "  cutoff: %" FCS_LMOD_FLOAT "f\n", cutoff);
     }
   );
+
+  return 0;
+}
+
+
+static void *near_compute_main(void *arg)
+{
+  fcs_near_t *near = arg;
+
+  fcs_int i;
+  box_t *real_boxes, *ghost_boxes, current_box;
+  fcs_int current_last, current_start, current_size;
+  fcs_int real_lasts[max_nboxes], real_starts[max_nboxes], real_sizes[max_nboxes];
+  fcs_int ghost_lasts[max_nboxes], ghost_starts[max_nboxes], ghost_sizes[max_nboxes];
+
+#ifdef DO_TIMING
+  double _t, *t = near->context->t;
+#endif
 
   real_boxes = malloc((near->nparticles + 1) * sizeof(box_t)); /* + 1 for a sentinel */
   if (near->nghosts > 0) ghost_boxes = malloc((near->nghosts + 1) * sizeof(box_t)); /* + 1 for a sentinel */
   else ghost_boxes = NULL;
 
-  TIMING_SYNC(comm); TIMING_START(t[1]);
-  create_boxes(near->nparticles, real_boxes, near->positions, near->indices, near->box_base, near->box_a, near->box_b, near->box_c, periodicity, cutoff);
-  if (ghost_boxes) create_boxes(near->nghosts, ghost_boxes, near->ghost_positions, near->ghost_indices, near->box_base, near->box_a, near->box_b, near->box_c, periodicity, cutoff);
-  TIMING_SYNC(comm); TIMING_STOP(t[1]);
+  TIMING_SYNC(near->context->comm); TIMING_START(t[1]);
+  create_boxes(near->nparticles, real_boxes, near->positions, near->indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
+  if (ghost_boxes) create_boxes(near->nghosts, ghost_boxes, near->ghost_positions, near->ghost_indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[1]);
 
 #ifdef PRINT_PARTICLES
   printf("real:\n");
-  print_particles(near->nparticles, near->positions, comm_size, comm_rank, comm);
+  print_particles(near->nparticles, near->positions, near->context->comm_size, near->context->comm_rank, near->context->comm);
   if (ghost_boxes)
   {
     printf("ghost:\n");
-    print_particles(near->nghosts, near->ghost_positions, comm_size, comm_rank, comm);
+    print_particles(near->nghosts, near->ghost_positions, near->context->comm_size, near->context->comm_rank, near->context->comm);
   }
 #endif
 
-  TIMING_SYNC(comm); TIMING_START(t[2]);
+  TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
   sort_into_boxes(near->nparticles, real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
   if (ghost_boxes) sort_into_boxes(near->nghosts, ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-  TIMING_SYNC(comm); TIMING_STOP(t[2]);
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[2]);
 
 #ifdef BOX_SKIP_FORMAT
-  make_boxes_skip_format(near->nparticles, real_boxes);
-  if (ghost_boxes) make_boxes_skip_format(near->nghosts, ghost_boxes);
+  make_boxes_skip_format(near->nparticles, near->context->real_boxes);
+  if (near->context->ghost_boxes) make_boxes_skip_format(near->nghosts, near->context->ghost_boxes);
 #endif
 
 #ifdef PRINT_PARTICLES
-  print_boxes(near->nparticles, real_boxes);
+  print_boxes(near->nparticles, near->context->real_boxes);
 #endif
 
 /*  for (i = 0; i < nlocal_particles; ++i)
@@ -1184,7 +1230,7 @@ fcs_int fcs_near_compute(fcs_near_t *near,
 
   fcs_ocl_init(&ocl);
 
-  fcs_ocl_compute_near(&ocl, near->positions, near->charges, near->potentials, near->field, cutoff, near->nparticles, boxlist,linkedboxes,linkedboxesback,currentboxid); 
+  fcs_ocl_compute_near(&ocl, near->positions, near->charges, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,linkedboxes,linkedboxesback,currentboxid); 
 
   free(linkedboxes);
   free(linkedboxesback);
@@ -1232,7 +1278,7 @@ fcs_int fcs_near_compute(fcs_near_t *near,
     }
     free(ghostindexlist);
 
-    fcs_ocl_compute_near_ghost(&ocl, near->positions, near->potentials, near->field, cutoff, near->nparticles, boxlist,currentboxid, near->ghost_positions, near->ghost_charges,ghostboxlist,glinked,ghostlinkedboxes, near->nghosts, gbid);
+    fcs_ocl_compute_near_ghost(&ocl, near->positions, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,currentboxid, near->ghost_positions, near->ghost_charges,ghostboxlist,glinked,ghostlinkedboxes, near->nghosts, gbid);
 
     free(ghostlinkedboxes);
   }
@@ -1258,12 +1304,12 @@ fcs_int fcs_near_compute(fcs_near_t *near,
     TIMING_STOP_ADD(_t, t[5]);
 
     TIMING_START(_t);
-    compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, NULL, NULL, current_start, current_size, cutoff, near, compute_param);
+    compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, NULL, NULL, current_start, current_size, near->context->cutoff, near, near->context->compute_param);
     for (i = 0; i < nreal_neighbours; ++i)
     {
 /*      printf("  real-neighbour %" FCS_LMOD_INT "d: %" FCS_LMOD_INT "d / %" FCS_LMOD_INT "d\n", i, current_starts[i], current_sizes[i]);*/
 
-      compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, NULL, NULL, real_starts[i], real_sizes[i], cutoff, near, compute_param);
+      compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, NULL, NULL, real_starts[i], real_sizes[i], near->context->cutoff, near, near->context->compute_param);
 
       real_lasts[i] = real_starts[i] + real_sizes[i];
     }
@@ -1273,7 +1319,7 @@ fcs_int fcs_near_compute(fcs_near_t *near,
     {
 /*      printf("  ghost-neighbour %" FCS_LMOD_INT "d: %" FCS_LMOD_INT "d / %" FCS_LMOD_INT "d\n", i, ghost_starts[i], ghost_sizes[i]);*/
 
-      compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, near->ghost_positions, near->ghost_charges, ghost_starts[i], ghost_sizes[i], cutoff, near, compute_param);
+      compute_near(near->positions, near->charges, near->field, near->potentials, current_start, current_size, near->ghost_positions, near->ghost_charges, ghost_starts[i], ghost_sizes[i], near->context->cutoff, near, near->context->compute_param);
 
       ghost_lasts[i] = ghost_starts[i] + ghost_sizes[i];
     }
@@ -1284,20 +1330,125 @@ fcs_int fcs_near_compute(fcs_near_t *near,
 
 #endif /* FCS_ENABLE_OPENCL */
 
-  TIMING_SYNC(comm); TIMING_STOP(t[3]);
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[3]);
 
   free(real_boxes);
   if (ghost_boxes) free(ghost_boxes);
 
-exit:
-  TIMING_SYNC(comm); TIMING_STOP(t[0]);
+  return NULL;
+}
+
+
+static fcs_int near_compute_start(fcs_near_t *near, int async)
+{
+  if (near->context->running) return 1;
+
+#if FCS_NEAR_ENABLE_ASYNC
+  near->context->async = async;
+
+  if (near->context->async)
+  {
+    pthread_create(&near->context->thread, NULL, near_compute_main, near);
+
+  } else
+#endif
+  {
+    near_compute_main(near);
+  }
+
+  near->context->running = 1;
+
+  return 0;
+}
+
+
+static fcs_int near_compute_join(fcs_near_t *near)
+{
+  if (!near->context->running) return 1;
+
+#if FCS_NEAR_ENABLE_ASYNC
+  if (near->context->async)
+  {
+    pthread_join(near->context->thread, NULL);
+  }
+#endif
+
+  near->context->running = 0;
+
+  return 0;
+}
+
+
+static fcs_int near_compute_free(fcs_near_t *near)
+{
+#ifdef DO_TIMING
+  double *t = near->context->t;
+#endif
+
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[0]);
 
   TIMING_CMD(
-    if (comm_rank == 0)
+    if (near->context->comm_rank == 0)
       printf(TIMING_PRINT_PREFIX "fcs_near_compute: %f  %f  %f  %f  %f  %f  %f\n", t[0], t[1], t[2], t[3], t[4], t[5], t[6]);
   );
 
+  free(near->context);
+  near->context = NULL;
+
   return 0;
+}
+
+
+fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
+{
+  fcs_int ret = 0;
+
+  ret = near_compute_init(near, cutoff, compute_param, comm);
+  if (ret) goto exit;
+
+  ret = near_compute_start(near, 0);
+  if (ret) goto free_exit;
+
+  ret = near_compute_join(near);
+  if (ret) goto free_exit;
+
+free_exit:
+  ret = ret || near_compute_free(near);
+
+exit:
+  return ret;
+}
+
+
+fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
+{
+  fcs_int ret;
+
+  ret = near_compute_init(near, cutoff, compute_param, comm);
+  if (ret) goto exit;
+
+  ret = near_compute_start(near, 1);
+  if (ret) goto free_exit;
+
+  goto exit;
+
+free_exit:
+  ret = ret || near_compute_free(near);
+
+exit:
+  return ret;
+}
+
+
+fcs_int fcs_near_compute_join(fcs_near_t *near)
+{
+  fcs_int ret;
+
+  ret = near_compute_join(near);
+
+  ret = ret || near_compute_free(near);
+
+  return ret;
 }
 
 
