@@ -1,5 +1,6 @@
 /*
   Copyright (C) 2011, 2012, 2013 Olaf Lenz, Rene Halver, Michael Hofmann
+  Copyright (C) 2018 Michael Hofmann
   
   This file is part of ScaFaCoS.
   
@@ -1052,6 +1053,7 @@ typedef struct _fcs_near_compute_context_t
   int comm_size, comm_rank;
 
   fcs_int periodicity[3];
+  box_t *real_boxes, *ghost_boxes;
 
 } fcs_near_compute_context_t;
 
@@ -1127,12 +1129,10 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 }
 
 
-static void *near_compute_main(void *arg)
+static fcs_int near_compute_main_start(fcs_near_t *near)
 {
-  fcs_near_t *near = arg;
-
   fcs_int i;
-  box_t *real_boxes, *ghost_boxes, current_box;
+  box_t current_box;
   fcs_int current_last, current_start, current_size;
   fcs_int real_lasts[max_nboxes], real_starts[max_nboxes], real_sizes[max_nboxes];
   fcs_int ghost_lasts[max_nboxes], ghost_starts[max_nboxes], ghost_sizes[max_nboxes];
@@ -1141,13 +1141,13 @@ static void *near_compute_main(void *arg)
   double _t, *t = near->context->t;
 #endif
 
-  real_boxes = malloc((near->nparticles + 1) * sizeof(box_t)); /* + 1 for a sentinel */
-  if (near->nghosts > 0) ghost_boxes = malloc((near->nghosts + 1) * sizeof(box_t)); /* + 1 for a sentinel */
-  else ghost_boxes = NULL;
+  near->context->real_boxes = malloc((near->nparticles + 1) * sizeof(box_t)); /* + 1 for a sentinel */
+  if (near->nghosts > 0) near->context->ghost_boxes = malloc((near->nghosts + 1) * sizeof(box_t)); /* + 1 for a sentinel */
+  else near->context->ghost_boxes = NULL;
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[1]);
-  create_boxes(near->nparticles, real_boxes, near->positions, near->indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
-  if (ghost_boxes) create_boxes(near->nghosts, ghost_boxes, near->ghost_positions, near->ghost_indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
+  create_boxes(near->nparticles, near->context->real_boxes, near->positions, near->indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
+  if (near->context->ghost_boxes) create_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[1]);
 
 #ifdef PRINT_PARTICLES
@@ -1161,8 +1161,8 @@ static void *near_compute_main(void *arg)
 #endif
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
-  sort_into_boxes(near->nparticles, real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-  if (ghost_boxes) sort_into_boxes(near->nghosts, ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+  sort_into_boxes(near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+  if (near->context->ghost_boxes) sort_into_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[2]);
 
 #ifdef BOX_SKIP_FORMAT
@@ -1291,18 +1291,18 @@ static void *near_compute_main(void *arg)
 
   do
   {
-    current_box = real_boxes[current_last];
+    current_box = near->context->real_boxes[current_last];
 
     TIMING_START(_t);
-    find_box(real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
+    find_box(near->context->real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
     TIMING_STOP_ADD(_t, t[4]);
 
 /*    printf("box: " box_fmt ", start: %" FCS_LMOD_INT "d, size: %" FCS_LMOD_INT "d\n",
       box_val(current_box), current_start, current_size);*/
 
     TIMING_START(_t);
-    find_neighbours(nreal_neighbours, real_neighbours, real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
-    if (ghost_boxes) find_neighbours(nghost_neighbours, ghost_neighbours, ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
+    find_neighbours(nreal_neighbours, real_neighbours, near->context->real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
+    if (near->context->ghost_boxes) find_neighbours(nghost_neighbours, ghost_neighbours, near->context->ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
     TIMING_STOP_ADD(_t, t[5]);
 
     TIMING_START(_t);
@@ -1316,7 +1316,7 @@ static void *near_compute_main(void *arg)
       real_lasts[i] = real_starts[i] + real_sizes[i];
     }
 
-    if (ghost_boxes)
+    if (near->context->ghost_boxes)
     for (i = 0; i < nghost_neighbours; ++i)
     {
 /*      printf("  ghost-neighbour %" FCS_LMOD_INT "d: %" FCS_LMOD_INT "d / %" FCS_LMOD_INT "d\n", i, ghost_starts[i], ghost_sizes[i]);*/
@@ -1334,11 +1334,32 @@ static void *near_compute_main(void *arg)
 
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[3]);
 
-  free(real_boxes);
-  if (ghost_boxes) free(ghost_boxes);
+  return 0;
+}
+
+
+static fcs_int near_compute_main_join(fcs_near_t *near)
+{
+  free(near->context->real_boxes);
+  if (near->context->ghost_boxes) free(near->context->ghost_boxes);
+
+  return 0;
+}
+
+
+#if FCS_NEAR_ENABLE_ASYNC
+
+static void *near_compute_main(void *arg)
+{
+  fcs_near_t *near = (fcs_near_t *) arg;
+
+  near_compute_main_start(near);
+  near_compute_main_join(near);
 
   return NULL;
 }
+
+#endif /* FCS_NEAR_ENABLE_ASYNC */
 
 
 static fcs_int near_compute_start(fcs_near_t *near, int async)
@@ -1353,9 +1374,9 @@ static fcs_int near_compute_start(fcs_near_t *near, int async)
     pthread_create(&near->context->thread, NULL, near_compute_main, near);
 
   } else
-#endif
+#endif /* FCS_NEAR_ENABLE_ASYNC */
   {
-    near_compute_main(near);
+    near_compute_main_start(near);
   }
 
   near->context->running = 1;
@@ -1372,8 +1393,12 @@ static fcs_int near_compute_join(fcs_near_t *near)
   if (near->context->async)
   {
     pthread_join(near->context->thread, NULL);
+
+  } else
+#endif /* FCS_NEAR_ENABLE_ASYNC */
+  {
+    near_compute_main_join(near);
   }
-#endif
 
   near->context->running = 0;
 
@@ -1381,7 +1406,7 @@ static fcs_int near_compute_join(fcs_near_t *near)
 }
 
 
-static fcs_int near_compute_free(fcs_near_t *near)
+static fcs_int near_compute_release(fcs_near_t *near)
 {
 #ifdef DO_TIMING
   double *t = near->context->t;
@@ -1419,7 +1444,7 @@ fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute
   if (ret) goto free_exit;
 
 free_exit:
-  ret = ret || near_compute_free(near);
+  ret = ret || near_compute_release(near);
 
 exit:
   return ret;
@@ -1439,7 +1464,7 @@ fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *c
   goto exit;
 
 free_exit:
-  ret = ret || near_compute_free(near);
+  ret = ret || near_compute_release(near);
 
 exit:
   return ret;
@@ -1452,7 +1477,7 @@ fcs_int fcs_near_compute_join(fcs_near_t *near)
 
   ret = near_compute_join(near);
 
-  ret = ret || near_compute_free(near);
+  ret = ret || near_compute_release(near);
 
   return ret;
 }
