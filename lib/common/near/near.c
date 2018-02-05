@@ -733,7 +733,9 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 }
 
 
-static fcs_int fcs_ocl_compute_near(fcs_ocl_context_t *ocl, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *fields, fcs_float cutoff, fcs_int nparticles, int *boxes,int *linked,int *linkedback, int nboxes)
+static fcs_int fcs_ocl_compute_near(fcs_ocl_context_t *ocl, fcs_float cutoff,
+  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *fields,
+  int nboxes, int *boxes, int *linked, int *linkedback)
 {
   /*  Initialiseriung  */
   cl_int ret;
@@ -756,7 +758,7 @@ const char *program_source[] = {
   "  double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
   "  double icut = 1/cut;  \n"
   "  int i = get_global_id(0),j,m,n,lb,a,b;\n"
-  "  for ( j=0; j<boxes[4*i+1]; j++)\n"  
+  "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
   "    erg=0;  \n"
   "    fergx=0;\n"
@@ -878,7 +880,11 @@ const char *program_source[] = {
 }
 
 
-static fcs_int fcs_ocl_compute_near_ghost(fcs_ocl_context_t *ocl, fcs_float *positions, fcs_float *potentials, fcs_float *fields, fcs_float cutoff, fcs_int nparticles, int *boxes, int nboxes, fcs_float *gpositions, fcs_float *gcharges, int *gboxes,int *glinklist, int *glinked, fcs_int nghosts, int ngboxes)
+static fcs_int fcs_ocl_compute_near_ghost(fcs_ocl_context_t *ocl, fcs_float cutoff,
+  fcs_int nparticles, fcs_float *positions, fcs_float *potentials, fcs_float *fields,
+  int nboxes, int *boxes,
+  fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
+  int ngboxes, int *gboxes, int *glinklist, int *glinked)
 {
   cl_int ret;
   cl_program program = NULL;
@@ -1126,7 +1132,7 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 #endif /* FCS_ENABLE_OPENCL */
 
   INFO_CMD(
-    if (comm_rank == 0)
+    if (near->context->comm_rank == 0)
     {
       printf(INFO_PRINT_PREFIX "near settings:\n");
       printf(INFO_PRINT_PREFIX "  box: [%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f]: [%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f] x [%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f] x [%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f]\n",
@@ -1194,16 +1200,16 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   current_last = 0;
   for (i = 0; i < max_nboxes; ++i) real_lasts[i] = ghost_lasts[i] = 0;
 
-  TIMING_SYNC(comm); TIMING_START(t[3]);
+  TIMING_SYNC(near->context->comm); TIMING_START(t[3]);
 
 #if FCS_ENABLE_OPENCL
 
   /*  Hilfsarrays erstellen  */
   current_last=0;
-  int * indexlist = malloc(near->nparticles * sizeof(int));
+  int *indexlist = malloc(near->nparticles * sizeof(int));
   int currentboxid=0;
   int j;
-  int * boxlisttmp = malloc( 2 * near->nparticles * sizeof(int));
+  int *boxlisttmp = malloc(2 * near->nparticles * sizeof(int));
 
   do {
     current_box = near->context->real_boxes[current_last];
@@ -1215,15 +1221,15 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     current_last = current_start + current_size;
   } while (current_last < near->nparticles);
 
-  int * boxlist = malloc( 4 * currentboxid * sizeof(int));
+  int *boxlist = malloc(4 * currentboxid * sizeof(int));
   for (i=0; i< currentboxid; i++) {
     boxlist[4*i] = boxlisttmp[2*i];
     boxlist[4*i+1] = boxlisttmp[2*i+1];
   }
   free(boxlisttmp);
 
-  int * linkedboxes = malloc(13 * currentboxid * sizeof(int));  
-  int * linkedboxesback = malloc(13 * currentboxid * sizeof(int));  
+  int *linkedboxes = malloc(13 * currentboxid * sizeof(int));  
+  int *linkedboxesback = malloc(13 * currentboxid * sizeof(int));  
 
   for (i=0; i<13; i++) {
     real_lasts[i]=0;
@@ -1248,7 +1254,9 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   }
   free(indexlist);
 
-  fcs_ocl_compute_near(&near->context->ocl, near->positions, near->charges, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,linkedboxes,linkedboxesback,currentboxid); 
+  fcs_ocl_compute_near(&near->context->ocl, near->context->cutoff,
+    near->nparticles, near->positions, near->charges, near->potentials, near->field,
+    currentboxid, boxlist, linkedboxes, linkedboxesback); 
 
   free(linkedboxes);
   free(linkedboxesback);
@@ -1266,14 +1274,14 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
       ghostboxlisttmp[2*gbid+1]=current_size;
       ghostindexlist[current_start]=gbid;
       gbid++;
-          current_last = current_start + current_size;
+      current_last = current_start + current_size;
     } while (current_last < near->nghosts);
     int * ghostboxlist = malloc ( 2 * gbid * sizeof(int));
     for (i=0; i< gbid; i++) {
       ghostboxlist[2*i] = ghostboxlisttmp[2*i];
       ghostboxlist[2*i+1] = ghostboxlisttmp[2*i+1];
     }
-    free(ghostboxlist);        
+    free(ghostboxlisttmp);
 
     int * ghostlinkedboxes = malloc(27 * currentboxid * sizeof(int));  
       for (i=0; i<27; i++) {
@@ -1296,10 +1304,18 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     }
     free(ghostindexlist);
 
-    fcs_ocl_compute_near_ghost(&near->context->ocl, near->positions, near->potentials, near->field, near->context->cutoff, near->nparticles, boxlist,currentboxid, near->ghost_positions, near->ghost_charges,ghostboxlist,glinked,ghostlinkedboxes, near->nghosts, gbid);
+    fcs_ocl_compute_near_ghost(&near->context->ocl, near->context->cutoff,
+      near->nparticles, near->positions, near->potentials, near->field,
+      currentboxid, boxlist,
+      near->nghosts, near->ghost_positions, near->ghost_charges,
+      gbid, ghostboxlist, glinked, ghostlinkedboxes);
 
+    free(ghostboxlist);
+    free(glinked);
     free(ghostlinkedboxes);
   }
+
+  free(boxlist);
 
 #else /* FCS_ENABLE_OPENCL */
 
@@ -1638,7 +1654,7 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
   fcs_gridsort_get_sorted_particles(&gridsort, &nlocal_s, NULL, &positions_s, &charges_s, &indices_s);
 
 #ifdef SEPARATE_GHOSTS
-  fcs_gridsort_separate_ghosts(&gridsort, &nlocal_s_real, &nlocal_s_ghost);
+  fcs_gridsort_separate_ghosts(&gridsort);
   fcs_gridsort_get_ghost_particles(&gridsort, &nlocal_s_ghost, &positions_s_ghost, &charges_s_ghost, &indices_s_ghost);
 #endif
 
