@@ -751,8 +751,6 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 }
 
 
-#if FCS_ENABLE_OPENCL_ASYNC
-
  /*  OpenCL Kernel  */
 static const char *fcs_ocl_compute_kernel_source[] = {
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
@@ -998,263 +996,6 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
   return 0;
 }
 
-#else /* FCS_ENABLE_OPENCL_ASYNC */
-
-static fcs_int fcs_ocl_compute_near_real(fcs_ocl_context_t *ocl, fcs_float cutoff,
-  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
-  int nboxes, int *boxes, int *linked, int *linkedback)
-{
-  /*  Initialiseriung  */
-  cl_int ret;
-  cl_program program = NULL;
-  cl_kernel kernel = NULL;
-    
-  cl_mem input_positions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles*3, positions, &_err));
-  cl_mem input_charges = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles, charges, &_err));
-  cl_mem input_field = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles*3, field, &_err));
-  cl_mem input_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles, potentials, &_err));
-  cl_mem input_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes*4, boxes, &_err));
-  cl_mem input_linkedboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes*13, linked, &_err));
-  cl_mem input_linkedbackboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes*13, linkedback, &_err));
-  
- /*  OpenCL Kernel  */
-const char *program_source[] = {
-  "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
-  "__kernel void cal_potential(double cut, __global double *positions, __global double *charges, __global double *field, __global double *pots, __global int *boxes, __global int *linked,__global int *linkedback, int size)\n"
-  "{\n"
-  "  double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "  double icut = 1/cut;  \n"
-  "  int i = get_global_id(0),j,m,n,lb,a,b;\n"
-  "  for ( j=0; j<boxes[4*i+1]; j++)\n"
-  "  {\n"
-  "    erg=0;  \n"
-  "    fergx=0;\n"
-  "    fergy=0;\n"
-  "    fergz=0;\n"
-  "    a=boxes[4*i]+j;\n"
-  "    ax=positions[(3*a)];\n"
-  "    ay=positions[(3*a)+1];\n"
-  "    az=positions[(3*a)+2];\n"
-  "    for ( m=0; m<boxes[i*4+1]; m++)\n"
-  "    {\n"
-  "      b=boxes[i*4]+m;\n"
-  "      if (j != m)\n"
-  "      {\n"
-  "        aa = ax - positions[(3*b)];\n"
-  "        ab = ay - positions[((3*b)+1)];\n"
-  "        ac = az - positions[((3*b)+2)];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cut)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
-  "          erg= erg +(charges[b] / dis);\n"
-  "        }\n"
-  "      }\n"
-  "    }\n"
-  "    \n"
-  "    for (m=0;m<boxes[4*i+2]; m++)\n"
-  "    {\n"
-  "      lb=linked[i*13+m];\n"
-  "      for (n=0;n<boxes[4*lb+1];n++)\n"
-  "      {    \n"
-  "        b=boxes[4*lb]+n;\n"
-  "        aa = ax - positions[3*b];\n"
-  "        ab = ay - positions[3*b+1];\n"
-  "        ac = az - positions[3*b+2];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cut)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
-  "          erg= erg + (charges[b] / dis);\n"
-  "        }  \n"
-  "      }    \n"
-  "    }\n"
-  "\n"
-  "    for (m=0;m<boxes[4*i+3]; m++)\n"
-  "    {\n"
-  "      lb=linkedback[i*13+m];\n"
-  "      for (n=0;n<boxes[4*lb+1];n++)\n"
-  "      {\n"
-  "        b=boxes[4*lb]+n;\n"
-  "        aa = ax - positions[3*b];\n"
-  "        ab = ay - positions[3*b+1];\n"
-  "        ac = az - positions[3*b+2];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cut)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
-  "          erg= erg + (charges[b] / dis);\n"
-  "        }  \n"
-  "      }    \n"
-  "    }\n"
-  "    field[(3*a)]=field[(3*a)]+fergx;\n"
-  "    field[3*a+1]=field[((3*a)+1)]+fergy;\n"
-  "    field[3*a+2]=field[((3*a)+2)]+fergz;\n"
-  "    pots[a]=pots[a] + erg;\n"
-  "  }\n"
-  "}\n"
-  };
-  /*  Programm erstellen  */
-  program = clCreateProgramWithSource(ocl->context, sizeof(program_source)/sizeof(*program_source), program_source, NULL, &ret);  
-  ret = clBuildProgram(program, 1, &ocl->device_id, NULL, NULL, NULL);
-  if (ret != CL_SUCCESS)
-  {
-    size_t length;
-    char buffer[2048];
-    clGetProgramBuildInfo(program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
-    printf("clGetProgramBuildInfo: %s\n", buffer);
-  }
-  kernel = clCreateKernel(program, "cal_potential", &ret);
-
-  /*  Parameter uebergeben  */
-  CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cutoff), &cutoff));
-  CL_CHECK(clSetKernelArg(kernel, 1, sizeof(input_positions), &input_positions));
-  CL_CHECK(clSetKernelArg(kernel, 2, sizeof(input_charges), &input_charges));
-  CL_CHECK(clSetKernelArg(kernel, 3, sizeof(input_field), &input_field));
-  CL_CHECK(clSetKernelArg(kernel, 4, sizeof(input_potentials), &input_potentials));
-  CL_CHECK(clSetKernelArg(kernel, 5, sizeof(input_boxes), &input_boxes));
-  CL_CHECK(clSetKernelArg(kernel, 6, sizeof(input_linkedboxes), &input_linkedboxes));
-  CL_CHECK(clSetKernelArg(kernel, 7, sizeof(input_linkedbackboxes), &input_linkedbackboxes));
-  CL_CHECK(clSetKernelArg(kernel, 8, sizeof(nparticles), &nparticles));
-
-  /*  Ausfuerung der Berechnung  */
-  cl_event kernel_completion;
-  size_t global_work_size[1] = { nboxes };
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, &kernel_completion));
-
-
-  CL_CHECK(clWaitForEvents(1, &kernel_completion));
-  CL_CHECK(clReleaseEvent(kernel_completion));
-
-  /*  Ergebnisse der Berechnung laden  */
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, input_field, CL_TRUE, 0, 3*nparticles*sizeof(double), field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, input_potentials, CL_TRUE, 0, nparticles*sizeof(double), potentials, 0, NULL, NULL));
-
-  /* Finalization */
-  ret = clFlush(ocl->command_queue);
-  ret = clFinish(ocl->command_queue);
-  ret = clReleaseKernel(kernel);
-  ret = clReleaseProgram(program);
-
-  return 0;
-}
-
-
-static fcs_int fcs_ocl_compute_near_ghost(fcs_ocl_context_t *ocl, fcs_float cutoff,
-  fcs_int nparticles, fcs_float *positions, fcs_float *potentials, fcs_float *field,
-  int nboxes, int *boxes,
-  fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
-  int ngboxes, int *gboxes, int *glinklist, int *glinked)
-{
-  cl_int ret;
-  cl_program program = NULL;
-  cl_kernel kernel = NULL;
-     
-  /*  Memory Buffer erstellen  */
-  cl_mem input_positions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles*3, positions, &_err));
-  cl_mem input_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double)*nghosts*3, gpositions, &_err));
-  cl_mem input_gcharges = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double)*nghosts, gcharges, &_err));
-  cl_mem input_field = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles*3, field, &_err));
-  cl_mem input_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double)*nparticles, potentials, &_err));
-  cl_mem input_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes*4, boxes, &_err));
-  cl_mem input_gboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*ngboxes*2, gboxes, &_err));
-  cl_mem input_glinklist = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes*2, glinklist, &_err));
-  cl_mem input_glinkedboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int)*nboxes * nghost_neighbours, glinked, &_err));
-
-  /* OpenCL Kernel */
-  const char *program_source[] = {
-  "  #pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
-  "  __kernel void cal_potential_ghosts(double cut, __global double *positions, __global double *infield, __global double *inpots, __global int *boxes, __global double *gpositions, __global double *gcharges,__global int *gboxes, __global int *glinklist, __global int *linked, int size)\n"
-  "      {\n"
-  "    double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "    double icut = 1/cut;  \n"
-  "    int i = get_global_id(0), j,m,n,lb,a,b;\n"
-  "    for ( j=0; j<boxes[4*i+1]; j++)\n"
-  "    {\n"
-  "      erg=0;  \n"
-  "      fergx=0;\n"
-  "      fergy=0;\n"
-  "      fergz=0;\n"
-  "      a=boxes[4*i]+j;\n"
-  "      ax=positions[(3*a)];\n"
-  "      ay=positions[(3*a)+1];\n"
-  "      az=positions[(3*a)+2];\n"
-  "\n"
-  "      for (m=0;m<glinklist[2*i]; m++)\n"
-  "      {\n"
-  "        lb=linked[27*i+m];\n"
-  "        for (n=0;n<gboxes[2*lb+1];n++)\n"
-  "        {\n"
-  "          b=gboxes[2*lb]+n;\n"
-  "          aa = ax - gpositions[3*b];\n"
-  "          ab = ay - gpositions[3*b+1];\n"
-  "          ac = az - gpositions[3*b+2];\n"
-  "          dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "          if (dis>cut)\n"
-  "          {\n"
-  "            dis3= dis*dis*dis;\n"
-  "            fergx= fergx - (gcharges[b] * (aa/dis3));\n"
-  "            fergy= fergy - (gcharges[b] * (ab/dis3));\n"
-  "            fergz= fergz - (gcharges[b] * (ac/dis3));\n"
-  "            erg= erg + (gcharges[b] / dis);\n"
-  "          }  \n"
-  "        }    \n"
-  "      }\n"
-  "      infield[(3*a)]=infield[(3*a)]+fergx;\n"
-  "      infield[3*a+1]=infield[((3*a)+1)]+fergy;\n"
-  "      infield[3*a+2]=infield[((3*a)+2)]+fergz;\n"
-  "      inpots[a]=inpots[a] + erg;\n"
-  "    } \n"
-  "  }\n"
-  };
-
-  program = clCreateProgramWithSource(ocl->context, sizeof(program_source)/sizeof(*program_source), program_source, NULL, &ret);
-  ret = clBuildProgram(program, 1, &ocl->device_id, NULL, NULL, NULL);
-  kernel = clCreateKernel(program, "cal_potential_ghosts", &ret);
-     
-  /* Parameter uenergeben */
-  CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cutoff), &cutoff));
-  CL_CHECK(clSetKernelArg(kernel, 1, sizeof(input_positions), &input_positions));
-  CL_CHECK(clSetKernelArg(kernel, 2, sizeof(input_field), &input_field));
-  CL_CHECK(clSetKernelArg(kernel, 3, sizeof(input_potentials), &input_potentials));
-  CL_CHECK(clSetKernelArg(kernel, 4, sizeof(input_boxes), &input_boxes));
-  CL_CHECK(clSetKernelArg(kernel, 5, sizeof(input_gpositions), &input_gpositions));
-  CL_CHECK(clSetKernelArg(kernel, 6, sizeof(input_gcharges), &input_gcharges));
-  CL_CHECK(clSetKernelArg(kernel, 7, sizeof(input_gboxes), &input_gboxes));
-  CL_CHECK(clSetKernelArg(kernel, 8, sizeof(input_glinklist), &input_glinklist));
-  CL_CHECK(clSetKernelArg(kernel, 9, sizeof(input_glinkedboxes), &input_glinkedboxes));
-  CL_CHECK(clSetKernelArg(kernel, 10, sizeof(nparticles), &nparticles));
-
-  /*  Ausfuerung der Berechnung  */
-  cl_event kernel_completion;
-  size_t global_work_size[1] = { nboxes };
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, &kernel_completion));
-  CL_CHECK(clWaitForEvents(1, &kernel_completion));
-  CL_CHECK(clReleaseEvent(kernel_completion));
-
-  /*  Ergebnisse der Berechnung laden  */
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, input_field, CL_TRUE, 0, 3*nparticles*sizeof(double), field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, input_potentials, CL_TRUE, 0, nparticles*sizeof(double), potentials, 0, NULL, NULL));
-
-    /* Finalization */
-  ret = clFlush(ocl->command_queue);
-  ret = clFinish(ocl->command_queue);
-  ret = clReleaseKernel(kernel);
-  ret = clReleaseProgram(program);
-
-  return 0;
-}
-
-#endif /* FCS_ENABLE_OPENCL_ASYNC */
 
 #else /* FCS_ENABLE_OPENCL */
 
@@ -1474,8 +1215,6 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
 #if FCS_ENABLE_OPENCL
 
-#if FCS_ENABLE_OPENCL_ASYNC
-
   int j;
 
   near->context->ocl.nboxes = 0;
@@ -1593,122 +1332,29 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     near->nghosts, near->ghost_positions, near->ghost_charges,
     near->context->ocl.nghostboxes, near->context->ocl.ghostboxlist, near->context->ocl.ghostlinked, near->context->ocl.ghostlinkedboxes);
 
-#else /* FCS_ENABLE_OPENCL_ASYNC */
+#if !FCS_ENABLE_OPENCL_ASYNC
 
-  /*  Hilfsarrays erstellen  */
-  current_last=0;
-  int *indexlist = malloc(near->nparticles * sizeof(int));
-  int currentboxid=0;
-  int j;
-  int *boxlisttmp = malloc(2 * near->nparticles * sizeof(int));
+  fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field, near->nghosts);
 
-  do {
-    current_box = near->context->real_boxes[current_last];
-    find_box(near->context->real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
-    boxlisttmp[2*currentboxid]=current_start;
-    boxlisttmp[2*currentboxid+1]=current_size;
-    indexlist[current_start]=currentboxid;
-    currentboxid++;
-    current_last = current_start + current_size;
-  } while (current_last < near->nparticles);
-
-  int *boxlist = malloc(4 * currentboxid * sizeof(int));
-  for (i=0; i< currentboxid; i++) {
-    boxlist[4*i] = boxlisttmp[2*i];
-    boxlist[4*i+1] = boxlisttmp[2*i+1];
-  }
-  free(boxlisttmp);
-
-  int *linkedboxes = malloc(13 * currentboxid * sizeof(int));  
-  int *linkedboxesback = malloc(13 * currentboxid * sizeof(int));  
-
-  for (i=0; i<13; i++) {
-    real_lasts[i]=0;
-  }  
-  for (i=0; i< currentboxid; i++) {
-    boxlist[4*i+2]=0;
-    boxlist[4*i+3]=0;
+  if (near->context->ghost_boxes)
+  {
+    free(near->context->ocl.ghostboxlist);
+    near->context->ocl.ghostboxlist = NULL;
+    free(near->context->ocl.ghostlinked);
+    near->context->ocl.ghostlinked = NULL;
+    free(near->context->ocl.ghostlinkedboxes);
+    near->context->ocl.ghostlinkedboxes = NULL;
   }
 
-  for (i = 0; i < currentboxid; i++) {
-    current_box = near->context->real_boxes[boxlist[4*i]];  
-    find_neighbours(nreal_neighbours, real_neighbours, near->context->real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
-    for (j=0; j<13;j++) {
-      if (real_sizes[j]>0) {
-        linkedboxes[(13*i)+boxlist[4*i+2]]=indexlist[real_starts[j]];
-        boxlist[4*i+2]++;
-        linkedboxesback[13*(indexlist[real_starts[j]])+(boxlist[4*indexlist[real_starts[j]]+3])]=i;
-        boxlist[4*(indexlist[real_starts[j]])+3]++;
-      }
-      real_lasts[j]=real_starts[j]+real_sizes[j];
-    }
-  }
-  free(indexlist);
+  near->context->ocl.nboxes = 0;
+  free(near->context->ocl.boxlist);
+  near->context->ocl.boxlist = NULL;
+  free(near->context->ocl.linkedboxes);
+  near->context->ocl.linkedboxes = NULL;
+  free(near->context->ocl.linkedboxesback);
+  near->context->ocl.linkedboxesback = NULL;
 
-  fcs_ocl_compute_near_real(&near->context->ocl, near->context->cutoff,
-    near->nparticles, near->positions, near->charges, near->potentials, near->field,
-    currentboxid, boxlist, linkedboxes, linkedboxesback); 
-
-  free(linkedboxes);
-  free(linkedboxesback);
-
-  if (near->context->ghost_boxes) {
-    int gbid=0;
-    int * ghostindexlist = malloc(near->nghosts * sizeof(int));
-    int * ghostboxlisttmp = malloc( 2 * near->nghosts * sizeof(int));
-    int * glinked = malloc (2 * currentboxid * sizeof(int));
-    current_last=0;
-    do {
-      current_box = near->context->ghost_boxes[current_last];
-      find_box(near->context->ghost_boxes, near->nghosts, current_box, current_last, &current_start, &current_size);
-      ghostboxlisttmp[2*gbid]=current_start;
-      ghostboxlisttmp[2*gbid+1]=current_size;
-      ghostindexlist[current_start]=gbid;
-      gbid++;
-      current_last = current_start + current_size;
-    } while (current_last < near->nghosts);
-    int * ghostboxlist = malloc ( 2 * gbid * sizeof(int));
-    for (i=0; i< gbid; i++) {
-      ghostboxlist[2*i] = ghostboxlisttmp[2*i];
-      ghostboxlist[2*i+1] = ghostboxlisttmp[2*i+1];
-    }
-    free(ghostboxlisttmp);
-
-    int * ghostlinkedboxes = malloc(27 * currentboxid * sizeof(int));  
-      for (i=0; i<27; i++) {
-      ghost_lasts[i]=0;
-    }  
-      for (i=0; i< currentboxid; i++) {
-      glinked[2*i]=0;
-      glinked[2*i+1]=0;
-    }
-    for (i = 0; i < currentboxid; i++) {
-      current_box = near->context->real_boxes[boxlist[4*i]];  
-      find_neighbours(nghost_neighbours, ghost_neighbours, near->context->ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
-      for (j=0; j<27;j++) {
-        if (ghost_sizes[j]>0) {
-          ghostlinkedboxes[(27*i)+glinked[2*i]]=ghostindexlist[ghost_starts[j]];
-          glinked[2*i]++;
-        }
-        ghost_lasts[j] = ghost_starts[j] + ghost_sizes[j];
-      }
-    }
-    free(ghostindexlist);
-
-    fcs_ocl_compute_near_ghost(&near->context->ocl, near->context->cutoff,
-      near->nparticles, near->positions, near->potentials, near->field,
-      currentboxid, boxlist,
-      near->nghosts, near->ghost_positions, near->ghost_charges,
-      gbid, ghostboxlist, glinked, ghostlinkedboxes);
-
-    free(ghostboxlist);
-    free(glinked);
-    free(ghostlinkedboxes);
-  }
-
-  free(boxlist);
-
-#endif /* FCS_ENABLE_OPENCL_ASYNC */
+#endif /* !FCS_ENABLE_OPENCL_ASYNC */
 
 #else /* FCS_ENABLE_OPENCL */
 
