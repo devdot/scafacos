@@ -66,6 +66,8 @@
 
 /*#define PRINT_PARTICLES*/
 
+#define POTENTIAL_CONST1  0
+
 #define DO_TIMING_SYNC
 
 #ifdef DO_TIMING
@@ -281,8 +283,13 @@ static void directc_local_one(fcs_int nout, fcs_int nin, fcs_float *xyz, fcs_flo
 
       if ((cutoff > 0 && cutoff > ir) || (cutoff < 0 && -cutoff < ir)) continue;
 
+#if POTENTIAL_CONST1
+      ++p[i];
+      ++p[j];
+#else
       p[i] += q[j] * ir;
       p[j] += q[i] * ir;
+#endif
 
       f[i*3+0] += q[j] * dx * ir * ir * ir;
       f[i*3+1] += q[j] * dy * ir * ir * ir;
@@ -303,7 +310,11 @@ static void directc_local_one(fcs_int nout, fcs_int nin, fcs_float *xyz, fcs_flo
 
       if ((cutoff > 0 && cutoff > ir) || (cutoff < 0 && -cutoff < ir)) continue;
 
+#if POTENTIAL_CONST1
+      ++p[i];
+#else
       p[i] += q[j] * ir;
+#endif
 
       f[i*3+0] += q[j] * dx * ir * ir * ir;
       f[i*3+1] += q[j] * dy * ir * ir * ir;
@@ -332,7 +343,11 @@ static void directc_local_two(fcs_int n0, fcs_float *xyz0, fcs_float *q0, fcs_in
 
     if ((cutoff > 0 && cutoff > ir) || (cutoff < 0 && -cutoff < ir)) continue;
 
+#if POTENTIAL_CONST1
+    ++p[i];
+#else
     p[i] += q1[j] * ir;
+#endif
     
     f[i*3+0] += q1[j] * dx * ir * ir * ir;
     f[i*3+1] += q1[j] * dy * ir * ir * ir;
@@ -366,7 +381,11 @@ static void directc_local_periodic(fcs_int n0, fcs_float *xyz0, fcs_float *q0, f
 
       if ((cutoff > 0 && cutoff > ir) || (cutoff < 0 && -cutoff < ir)) continue;
 
+#if POTENTIAL_CONST1
+      ++p[i];
+#else
       p[i] += q1[j] * ir;
+#endif
 
       f[i*3+0] += q1[j] * dx * ir * ir * ir;
       f[i*3+1] += q1[j] * dy * ir * ir * ir;
@@ -475,11 +494,30 @@ static fcs_float get_periodic_factor(fcs_float *v0, fcs_float *v1, fcs_float *v2
 
 static void directc_coulomb_field_potential(const void *param, fcs_float dist, fcs_float *f, fcs_float *p)
 {
+#if POTENTIAL_CONST1
+  *p = 1.0;
+#else
   *p = 1.0 / dist;
+#endif
+
   *f = -(*p) * (*p);
 }
 
 static FCS_NEAR_LOOP_FP(directc_coulomb_loop_fp, directc_coulomb_field_potential)
+
+const char *directc_coulomb_field_potential_source =
+  "static void directc_coulomb_field_potential(const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
+  "{\n"
+#if POTENTIAL_CONST1
+  "  *p = 1.0;\n"
+#else
+  "  *p = 1.0 / dist;\n"
+#endif
+  "\n"
+  "  *f = -(*p) * (*p);\n"
+  "}\n"
+  ;
+const char *directc_coulomb_field_potential_function = "directc_coulomb_field_potential";
 
 
 void fcs_directc_run(fcs_directc_t *directc, MPI_Comm comm)
@@ -545,12 +583,25 @@ void fcs_directc_run(fcs_directc_t *directc, MPI_Comm comm)
     fcs_near_create(&near);
 
     fcs_near_set_loop(&near, directc_coulomb_loop_fp);
+    fcs_near_set_field_potential_source(&near, directc_coulomb_field_potential_source, directc_coulomb_field_potential_function);
     fcs_near_set_system(&near, directc->box_base, directc->box_a, directc->box_b, directc->box_c, periodic);
+#if POTENTIAL_CONST1
+    fcs_float *charges1 = malloc(directc->max_nparticles * sizeof(fcs_float));
+    for (i = 0; i < directc->nparticles; ++i) charges1[i] = 1.0;
+    fcs_near_set_particles(&near, directc->nparticles, directc->max_nparticles, directc->positions, charges1, NULL, directc->field, directc->potentials);
+#else
     fcs_near_set_particles(&near, directc->nparticles, directc->max_nparticles, directc->positions, directc->charges, NULL, directc->field, directc->potentials);
+#endif
     fcs_near_set_max_particle_move(&near, directc->max_particle_move);
     fcs_near_set_resort(&near, directc->resort);
 
+    fcs_near_set_compute_param_size(&near, 0);
+
     fcs_near_field_solver(&near, fabs(directc->cutoff), NULL, comm);
+
+#if POTENTIAL_CONST1
+    free(charges1);
+#endif
 
     if (directc->resort)
     {
