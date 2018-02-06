@@ -67,6 +67,9 @@ typedef struct _fcs_near_t
 
   fcs_near_loop_f compute_loop;
 
+  char *compute_field_potential_source, *compute_field_potential_function;
+  fcs_int compute_param_size;
+
   fcs_float box_base[3], box_a[3], box_b[3], box_c[3];
   fcs_int periodicity[3];
 
@@ -149,6 +152,10 @@ void fcs_near_set_field_potential_3diff(fcs_near_t *near, fcs_near_field_potenti
  * @param compute_loop fcs_near_loop_f callback function for whole loop of computations
  */
 void fcs_near_set_loop(fcs_near_t *near, fcs_near_loop_f compute_loop);
+
+void fcs_near_set_field_potential_source(fcs_near_t *near, const char *compute_field_potential_source, const char *compute_field_potential_function);
+
+void fcs_near_set_compute_param_size(fcs_near_t *near, fcs_int compute_param_size);
 
 /**
  * @brief set particle system properties

@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #include <mpi.h>
 
@@ -287,6 +288,11 @@ void fcs_near_create(fcs_near_t *near)
 
   near->compute_loop = NULL;
 
+  near->compute_field_potential_source = NULL;
+  near->compute_field_potential_function = NULL;
+
+  near->compute_param_size = 0;
+
   near->box_base[0] = near->box_base[1] = near->box_base[2] = 0;
   near->box_a[0] = near->box_a[1] = near->box_a[2] = 0;
   near->box_b[0] = near->box_b[1] = near->box_b[2] = 0;
@@ -323,6 +329,13 @@ void fcs_near_destroy(fcs_near_t *near)
   near->compute_field_potential_3diff = NULL;
 
   near->compute_loop = NULL;
+
+  if (near->compute_field_potential_source) free(near->compute_field_potential_source);
+  near->compute_field_potential_source = NULL;
+  if (near->compute_field_potential_function) free(near->compute_field_potential_function);
+  near->compute_field_potential_function = NULL;
+
+  near->compute_param_size = 0;
 
   near->box_base[0] = near->box_base[1] = near->box_base[2] = 0;
   near->box_a[0] = near->box_a[1] = near->box_a[2] = 0;
@@ -385,6 +398,22 @@ void fcs_near_set_field_potential_3diff(fcs_near_t *near, fcs_near_field_potenti
 void fcs_near_set_loop(fcs_near_t *near, fcs_near_loop_f compute_loop)
 {
   near->compute_loop = compute_loop;
+}
+
+
+void fcs_near_set_compute_param_size(fcs_near_t *near, fcs_int compute_param_size)
+{
+  near->compute_param_size = compute_param_size;
+}
+
+
+void fcs_near_set_field_potential_source(fcs_near_t *near, const char *compute_field_potential_source, const char *compute_field_potential_function)
+{
+  if (near->compute_field_potential_source) free(near->compute_field_potential_source);
+  near->compute_field_potential_source = strdup(compute_field_potential_source);
+
+  if (near->compute_field_potential_function) free(near->compute_field_potential_function);
+  near->compute_field_potential_function = strdup(compute_field_potential_function);
 }
 
 
@@ -746,16 +775,22 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 }
 
 
- /*  OpenCL Kernel  */
-static const char *fcs_ocl_compute_kernel_source[] = {
+#define KERNEL_INBOX       1
+#define KERNEL_LINKED      1
+#define KERNEL_LINKEDBACK  1
+
+static const char *fcs_ocl_compute_kernel_source_head =
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
   "\n"
 #if defined(FCS_FLOAT_IS_FLOAT)
   "#define fcs_float  float\n"
+  "#define fcs_sqrt(_x_)  sqrtf(_x_)\n"
 #elif defined(FCS_FLOAT_IS_DOUBLE)
   "#define fcs_float  double\n"
+  "#define fcs_sqrt(_x_)  sqrt(_x_)\n"
 #elif defined(FCS_FLOAT_IS_LONG_DOUBLE)
   "#define fcs_float  long double\n"
+  "#define fcs_sqrt(_x_)  sqrtl(_x_)\n"
 #else
 # error FCS float data type is unknown
 #endif
@@ -770,110 +805,120 @@ static const char *fcs_ocl_compute_kernel_source[] = {
 #else
 # error FCS int data type is unknown
 #endif
-  "\n"
+  ;
+
+static const char *fcs_ocl_compute_kernel_source_compute =
+  "static void coulomb_field_potential(const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
+  "{\n"
+  "  *p = 1.0 / dist;\n"
+  "  *f = -(*p) * (*p);\n"
+  "}\n"
+  ;
+static const char *fcs_ocl_compute_kernel_source_compute_function = "coulomb_field_potential";
+
+static const char *fcs_ocl_compute_kernel_source =
   "__kernel void compute_box_real(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked,__global fcs_int *linkedback)\n"
   "{\n"
-  "  fcs_float ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "  fcs_float icutoff = 1/cutoff;  \n"
+  "  fcs_float r_ij, f, p, fx;"
+  "  void *param = 0;"
+  "  fcs_float ax, ay, az, aa, ab, ac;\n"
+  "  fcs_float fs_x, fs_y, fs_z, ps;"
   "  size_t i = get_global_id(0);\n"
   "  fcs_int j,m,n,lb,a,b;\n"
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
-  "    erg=0;  \n"
-  "    fergx=0;\n"
-  "    fergy=0;\n"
-  "    fergz=0;\n"
-  "    a=boxes[4*i]+j;\n"
-  "    ax=positions[(3*a)];\n"
-  "    ay=positions[(3*a)+1];\n"
-  "    az=positions[(3*a)+2];\n"
-#if 0
-  "    field[3 * a + 0] = field[3 * a + 1] = field[3 * a + 2] = pots[a] = 0;\n"
-#endif
+  "    fs_x = fs_y = fs_z = 0;\n"
+  "    ps = 0;\n"
+  "    a = boxes[4 * i] + j;\n"
+  "    ax = positions[3 * a + 0];\n"
+  "    ay = positions[3 * a + 1];\n"
+  "    az = positions[3 * a + 2];\n"
+#if KERNEL_INBOX
   "    for ( m=0; m<boxes[i*4+1]; m++)\n"
   "    {\n"
-  "      b=boxes[i*4]+m;\n"
+  "      b = boxes[i * 4] + m;\n"
   "      if (j != m)\n"
   "      {\n"
-  "        aa = ax - positions[(3*b)];\n"
-  "        ab = ay - positions[((3*b)+1)];\n"
-  "        ac = az - positions[((3*b)+2)];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cutoff)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
+  "        aa = positions[3 * b + 0] - ax;\n"
+  "        ab = positions[3 * b + 1] - ay;\n"
+  "        ac = positions[3 * b + 2] - az;\n"
+  "        r_ij = fcs_sqrt((aa * aa) + (ab * ab) + (ac * ac));\n"
+  "        if (r_ij > cutoff) continue;\n"
+  "        _nfp_(param, r_ij, &f, &p);\n"
+  "        fx = f * charges[b] / r_ij;\n"
+  "        fs_x += fx * aa;\n"
+  "        fs_y += fx * ab;\n"
+  "        fs_z += fx * ac;\n"
 #if POTENTIAL_CONST1
-  "          erg = erg + 1;\n"
+  "        ps += 1;\n"
 #else
-  "          erg= erg +(charges[b] / dis);\n"
+  "        ps += p * charges[b];\n"
 #endif
-  "        }\n"
   "      }\n"
   "    }\n"
-  "    \n"
+#endif /* KERNEL_INBOX */
+  "\n"
+#if KERNEL_LINKED
   "    for (m=0;m<boxes[4*i+2]; m++)\n"
   "    {\n"
-  "      lb=linked[i*13+m];\n"
-  "      for (n=0;n<boxes[4*lb+1];n++)\n"
-  "      {    \n"
-  "        b=boxes[4*lb]+n;\n"
-  "        aa = ax - positions[3*b];\n"
-  "        ab = ay - positions[3*b+1];\n"
-  "        ac = az - positions[3*b+2];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cutoff)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
-#if POTENTIAL_CONST1
-  "          erg = erg + 1;\n"
-#else
-  "          erg= erg + (charges[b] / dis);\n"
-#endif
-  "        }  \n"
-  "      }    \n"
-  "    }\n"
-  "\n"
-  "    for (m=0;m<boxes[4*i+3]; m++)\n"
-  "    {\n"
-  "      lb=linkedback[i*13+m];\n"
+  "      lb = linked[i * 13 + m];\n"
   "      for (n=0;n<boxes[4*lb+1];n++)\n"
   "      {\n"
-  "        b=boxes[4*lb]+n;\n"
-  "        aa = ax - positions[3*b];\n"
-  "        ab = ay - positions[3*b+1];\n"
-  "        ac = az - positions[3*b+2];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis<=cutoff)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx + (charges[b] * (aa/dis3));\n"
-  "          fergy= fergy + (charges[b] * (ab/dis3));\n"
-  "          fergz= fergz + (charges[b] * (ac/dis3));\n"
+  "        b = boxes[4 * lb] + n;\n"
+  "        aa = positions[3 * b + 0] - ax;\n"
+  "        ab = positions[3 * b + 1] - ay;\n"
+  "        ac = positions[3 * b + 2] - az;\n"
+  "        r_ij = fcs_sqrt((aa * aa) + (ab * ab) + (ac * ac));\n"
+  "        if (r_ij > cutoff) continue;\n"
+  "        _nfp_(param, r_ij, &f, &p);\n"
+  "        fx = f * charges[b] / r_ij;\n"
+  "        fs_x += fx * aa;\n"
+  "        fs_y += fx * ab;\n"
+  "        fs_z += fx * ac;\n"
 #if POTENTIAL_CONST1
-  "          erg = erg + 1;\n"
+  "        ps += 1;\n"
 #else
-  "          erg= erg + (charges[b] / dis);\n"
+  "        ps += p * charges[b];\n"
 #endif
-  "        }  \n"
-  "      }    \n"
+  "      }\n"
   "    }\n"
-  "    field[(3*a)]=field[(3*a)]+fergx;\n"
-  "    field[3*a+1]=field[((3*a)+1)]+fergy;\n"
-  "    field[3*a+2]=field[((3*a)+2)]+fergz;\n"
-  "    pots[a]=pots[a] + erg;\n"
+#endif /* KERNEL_LINKED */
+  "\n"
+#if KERNEL_LINKEDBACK
+  "    for (m=0;m<boxes[4*i+3]; m++)\n"
+  "    {\n"
+  "      lb = linkedback[i * 13 + m];\n"
+  "      for (n=0;n<boxes[4*lb+1];n++)\n"
+  "      {\n"
+  "        b = boxes[4 * lb] + n;\n"
+  "        aa = positions[3 * b + 0] - ax;\n"
+  "        ab = positions[3 * b + 1] - ay;\n"
+  "        ac = positions[3 * b + 2] - az;\n"
+  "        r_ij = fcs_sqrt((aa * aa) + (ab * ab) + (ac * ac));\n"
+  "        if (r_ij > cutoff) continue;\n"
+  "        _nfp_(param, r_ij, &f, &p);\n"
+  "        fx = f * charges[b] / r_ij;\n"
+  "        fs_x += fx * aa;\n"
+  "        fs_y += fx * ab;\n"
+  "        fs_z += fx * ac;\n"
+#if POTENTIAL_CONST1
+  "        ps += 1;\n"
+#else
+  "        ps += p * charges[b];\n"
+#endif
+  "      }\n"
+  "    }\n"
+#endif /* KERNEL_LINKEDBACK */
+  "    field[3 * a + 0] += fs_x;\n"
+  "    field[3 * a + 1] += fs_y;\n"
+  "    field[3 * a + 2] += fs_z;\n"
+  "    pots[a] += ps;\n"
   "  }\n"
   "}\n"
   "\n"
   "__kernel void compute_box_ghosts(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
   "{\n"
   "  fcs_float ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "  fcs_float icutoff = 1/cutoff;  \n"
   "  size_t i = get_global_id(0);\n"
   "  fcs_int j,m,n,lb,a,b;\n"
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
@@ -896,7 +941,7 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "        aa = ax - gpositions[3*b];\n"
   "        ab = ay - gpositions[3*b+1];\n"
   "        ac = az - gpositions[3*b+2];\n"
-  "        dis =  sqrt ((aa*aa)+(ab*ab)+(ac*ac));\n"
+  "        dis = fcs_sqrt((aa*aa)+(ab*ab)+(ac*ac));\n"
   "        if (dis>cutoff)\n"
   "        {\n"
   "          dis3= dis*dis*dis;\n"
@@ -913,11 +958,9 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "    pots[a]=pots[a] + erg;\n"
   "  } \n"
   "}\n"
-};
-static const int fcs_ocl_compute_kernel_source_size = sizeof(fcs_ocl_compute_kernel_source) / sizeof(*fcs_ocl_compute_kernel_source);
+  ;
 
-
-static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff,
+static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const char *nfp_source, const char *nfp_function,
   fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
   fcs_int nboxes, fcs_int *boxes, fcs_int *linked, fcs_int *linkedback,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
@@ -956,14 +999,28 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinkedboxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * nghost_neighbours, glinked, 0, NULL, NULL));
   }
 
-  ocl->program = clCreateProgramWithSource(ocl->context, fcs_ocl_compute_kernel_source_size, fcs_ocl_compute_kernel_source, NULL, &ret);  // FIXME: CL_CHECK_ERR?
+  const char *sources[] = {
+    fcs_ocl_compute_kernel_source_head,
+    fcs_ocl_compute_kernel_source_compute,
+    "#define _nfp_  ", fcs_ocl_compute_kernel_source_compute_function, "\n",
+    fcs_ocl_compute_kernel_source
+  };
+  const cl_uint nsources = sizeof(sources) / sizeof(sources[0]);
+
+  if (nfp_source && nfp_function)
+  {
+    sources[1] = nfp_source;
+    sources[3] = nfp_function;
+  }
+
+  ocl->program = clCreateProgramWithSource(ocl->context, nsources, sources, NULL, &ret);  // FIXME: CL_CHECK_ERR?
   ret = clBuildProgram(ocl->program, 1, &ocl->device_id, NULL, NULL, NULL);
   if (ret != CL_SUCCESS)
   {
     size_t length;
     char buffer[2048];
     clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
-    printf("clGetProgramBuildInfo: %s\n", buffer);
+    printf("clGetProgramBuildInfo: %.*s\n", (int) length, buffer);
   }
   ocl->kernel_real = clCreateKernel(ocl->program, "compute_box_real", &ret);
 
@@ -1371,7 +1428,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     free(ghostindexlist);
   }
 
-  fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff,
+  fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->compute_field_potential_source, near->compute_field_potential_function,
     near->nparticles, near->positions, near->charges, near->potentials, near->field,
     near->context->ocl.nboxes, near->context->ocl.boxlist, near->context->ocl.linkedboxes, near->context->ocl.linkedboxesback,
     near->nghosts, near->ghost_positions, near->ghost_charges,
@@ -1379,7 +1436,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
 #if !FCS_ENABLE_OPENCL_ASYNC
 
-  fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field, near->nghosts);
+  fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field);
 
   if (near->context->ghost_boxes)
   {
@@ -1817,6 +1874,8 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
   fcs_near_set_field_potential_3diff(&near_s, near->compute_field_potential_3diff);
 
   fcs_near_set_loop(&near_s, near->compute_loop);
+
+  fcs_near_set_field_potential_source(&near_s, near->compute_field_potential_source, near->compute_field_potential_function);
 
   if (near->periodicity[0] < 0 || near->periodicity[1] < 0 || near->periodicity[2] < 0)
     fcs_near_set_system(&near_s, near->box_base, near->box_a, near->box_b, near->box_c, NULL);
