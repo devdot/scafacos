@@ -52,6 +52,8 @@
 #define FCS_ENABLE_OPENCL_CPU    1
 #define FCS_ENABLE_OPENCL_ASYNC  1
 
+#define POTENTIAL_CONST1  0
+
 
 #if FCS_ENABLE_OPENCL
 
@@ -694,7 +696,8 @@ typedef struct
   cl_mem mem_gpositions, mem_gcharges;
   cl_mem mem_gboxes, mem_glinklist, mem_glinkedboxes;
 
-  cl_event kernel_completion_real, kernel_completion_ghosts;
+  int nkernel_completions;
+  cl_event kernel_completions[2];
 
 } fcs_ocl_context_t;
 
@@ -788,7 +791,11 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "          fergx= fergx + (charges[b] * (aa/dis3));\n"
   "          fergy= fergy + (charges[b] * (ab/dis3));\n"
   "          fergz= fergz + (charges[b] * (ac/dis3));\n"
+#if POTENTIAL_CONST1
+  "          erg = erg + 1;\n"
+#else
   "          erg= erg +(charges[b] / dis);\n"
+#endif
   "        }\n"
   "      }\n"
   "    }\n"
@@ -809,7 +816,11 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "          fergx= fergx + (charges[b] * (aa/dis3));\n"
   "          fergy= fergy + (charges[b] * (ab/dis3));\n"
   "          fergz= fergz + (charges[b] * (ac/dis3));\n"
+#if POTENTIAL_CONST1
+  "          erg = erg + 1;\n"
+#else
   "          erg= erg + (charges[b] / dis);\n"
+#endif
   "        }  \n"
   "      }    \n"
   "    }\n"
@@ -830,7 +841,11 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "          fergx= fergx + (charges[b] * (aa/dis3));\n"
   "          fergy= fergy + (charges[b] * (ab/dis3));\n"
   "          fergz= fergz + (charges[b] * (ac/dis3));\n"
+#if POTENTIAL_CONST1
+  "          erg = erg + 1;\n"
+#else
   "          erg= erg + (charges[b] / dis);\n"
+#endif
   "        }  \n"
   "      }    \n"
   "    }\n"
@@ -903,6 +918,14 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   ocl->mem_linkedboxes     = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nreal_neighbours, linked, &_err));
   ocl->mem_linkedbackboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nreal_neighbours, linkedback, &_err));
 
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions, CL_FALSE, 0, sizeof(double) * nparticles * 3, positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges, CL_FALSE, 0, sizeof(double) * nparticles, charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, sizeof(double) * nparticles * 3, field, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, sizeof(double) * nparticles, potentials, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, 0, sizeof(int) * nboxes * 4, boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedboxes, CL_FALSE, 0, sizeof(int) * nboxes * nreal_neighbours, linked, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedbackboxes, CL_FALSE, 0, sizeof(int) * nboxes * nreal_neighbours, linkedback, 0, NULL, NULL));
+
   if (nghosts > 0)
   {
     ocl->mem_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double) * nghosts * 3, gpositions, &_err));
@@ -910,6 +933,12 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     ocl->mem_gboxes       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * ngboxes * 2, gboxes, &_err));
     ocl->mem_glinklist    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * 2, glinklist, &_err));
     ocl->mem_glinkedboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nghost_neighbours, glinked, &_err));
+
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, sizeof(double) * nghosts * 3, gpositions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, sizeof(double) * nghosts, gcharges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gboxes, CL_FALSE, 0, sizeof(int) * ngboxes * 2, gboxes, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinklist, CL_FALSE, 0, sizeof(int) * nboxes * 2, glinklist, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinkedboxes, CL_FALSE, 0, sizeof(int) * nboxes * nghost_neighbours, glinked, 0, NULL, NULL));
   }
 
   ocl->program = clCreateProgramWithSource(ocl->context, fcs_ocl_compute_kernel_source_size, fcs_ocl_compute_kernel_source, NULL, &ret);  // FIXME: CL_CHECK_ERR?
@@ -933,7 +962,9 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   CL_CHECK(clSetKernelArg(ocl->kernel_real, 7, sizeof(ocl->mem_linkedbackboxes), &ocl->mem_linkedbackboxes));
 
   size_t global_work_size[1] = { nboxes };
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->kernel_real, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completion_real));
+
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->kernel_real, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completions[0]));
+  ocl->nkernel_completions = 1;
 
   if (nghosts > 0)
   {
@@ -950,7 +981,8 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 8, sizeof(ocl->mem_glinklist), &ocl->mem_glinklist));
     CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 9, sizeof(ocl->mem_glinkedboxes), &ocl->mem_glinkedboxes));
 
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->kernel_ghosts, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completion_ghosts));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->kernel_ghosts, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completions[1]));
+    ocl->nkernel_completions = 2;
   }
 
   return 0;
@@ -958,20 +990,18 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
 
 static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *potentials, fcs_float *field, fcs_int nghosts)
 {
-  CL_CHECK(clWaitForEvents(1, &ocl->kernel_completion_real));
-  CL_CHECK(clReleaseEvent(ocl->kernel_completion_real));
+  CL_CHECK(clWaitForEvents(ocl->nkernel_completions, ocl->kernel_completions));
 
-  if (nghosts > 0)
-  {
-    CL_CHECK(clWaitForEvents(1, &ocl->kernel_completion_ghosts));
-    CL_CHECK(clReleaseEvent(ocl->kernel_completion_ghosts));
-  }
+  CL_CHECK(clReleaseEvent(ocl->kernel_completions[0]));
+  if (ocl->nkernel_completions > 1) CL_CHECK(clReleaseEvent(ocl->kernel_completions[1]));
 
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_TRUE, 0, nparticles * 3 * sizeof(double), field, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, nparticles * 3 * sizeof(double), field, 0, NULL, NULL));
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_potentials, CL_TRUE, 0, nparticles * sizeof(double), potentials, 0, NULL, NULL));
 
+#if 0
   CL_CHECK(clFlush(ocl->command_queue));
   CL_CHECK(clFinish(ocl->command_queue));
+#endif
 
   CL_CHECK(clReleaseMemObject(ocl->mem_positions));
   CL_CHECK(clReleaseMemObject(ocl->mem_charges));
