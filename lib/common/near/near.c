@@ -667,21 +667,13 @@ static void find_neighbours(fcs_int nneighbours, fcs_int *neighbours, box_t *box
 
 #if FCS_ENABLE_OPENCL
 
-struct clbox {
-  int start;
-  int size;
-  int nlinked;
-  int linked[13];
-};
-
-
 typedef struct
 {
-  int nboxes;
-  int *boxlist, *linkedboxes, *linkedboxesback;
+  fcs_int nboxes;
+  fcs_int *boxlist, *linkedboxes, *linkedboxesback;
 
-  int nghostboxes;
-  int *ghostboxlist, *ghostlinked, *ghostlinkedboxes;
+  fcs_int nghostboxes;
+  fcs_int *ghostboxlist, *ghostlinked, *ghostlinkedboxes;
 
   cl_context context;
   cl_command_queue command_queue;
@@ -758,11 +750,33 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 static const char *fcs_ocl_compute_kernel_source[] = {
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
   "\n"
-  "__kernel void compute_box_real(double cutoff, __global double *positions, __global double *charges, __global double *field, __global double *pots, __global int *boxes, __global int *linked,__global int *linkedback)\n"
+#if defined(FCS_FLOAT_IS_FLOAT)
+  "#define fcs_float  float\n"
+#elif defined(FCS_FLOAT_IS_DOUBLE)
+  "#define fcs_float  double\n"
+#elif defined(FCS_FLOAT_IS_LONG_DOUBLE)
+  "#define fcs_float  long double\n"
+#else
+# error FCS float data type is unknown
+#endif
+#if defined(FCS_INT_IS_SHORT)
+  "#define fcs_int  short\n"
+#elif defined(FCS_INT_IS_INT)
+  "#define fcs_int  int\n"
+#elif defined(FCS_INT_IS_LONG)
+  "#define fcs_int  long\n"
+#elif defined(FCS_INT_IS_LONG_LONG)
+  "#define fcs_int  long long\n"
+#else
+# error FCS int data type is unknown
+#endif
+  "\n"
+  "__kernel void compute_box_real(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked,__global fcs_int *linkedback)\n"
   "{\n"
-  "  double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "  double icutoff = 1/cutoff;  \n"
-  "  int i = get_global_id(0),j,m,n,lb,a,b;\n"
+  "  fcs_float ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
+  "  fcs_float icutoff = 1/cutoff;  \n"
+  "  size_t i = get_global_id(0);\n"
+  "  fcs_int j,m,n,lb,a,b;\n"
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
   "    erg=0;  \n"
@@ -856,11 +870,12 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "  }\n"
   "}\n"
   "\n"
-  "__kernel void compute_box_ghosts(double cutoff, __global double *positions, __global double *field, __global double *inpots, __global int *boxes, __global double *gpositions, __global double *gcharges,__global int *gboxes, __global int *glinklist, __global int *linked)\n"
+  "__kernel void compute_box_ghosts(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
   "{\n"
-  "  double ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
-  "  double icutoff = 1/cutoff;  \n"
-  "  int i = get_global_id(0), j,m,n,lb,a,b;\n"
+  "  fcs_float ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
+  "  fcs_float icutoff = 1/cutoff;  \n"
+  "  size_t i = get_global_id(0);\n"
+  "  fcs_int j,m,n,lb,a,b;\n"
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
   "    erg=0;  \n"
@@ -895,7 +910,7 @@ static const char *fcs_ocl_compute_kernel_source[] = {
   "    field[(3*a)]=field[(3*a)]+fergx;\n"
   "    field[3*a+1]=field[((3*a)+1)]+fergy;\n"
   "    field[3*a+2]=field[((3*a)+2)]+fergz;\n"
-  "    inpots[a]=inpots[a] + erg;\n"
+  "    pots[a]=pots[a] + erg;\n"
   "  } \n"
   "}\n"
 };
@@ -904,41 +919,41 @@ static const int fcs_ocl_compute_kernel_source_size = sizeof(fcs_ocl_compute_ker
 
 static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff,
   fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
-  int nboxes, int *boxes, int *linked, int *linkedback,
+  fcs_int nboxes, fcs_int *boxes, fcs_int *linked, fcs_int *linkedback,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
-  int ngboxes, int *gboxes, int *glinklist, int *glinked)
+  fcs_int ngboxes, fcs_int *gboxes, fcs_int *glinklist, fcs_int *glinked)
 {
   cl_int ret;
 
-  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double) * nparticles * 3, positions, &_err));
-  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double) * nparticles, charges, &_err));
-  ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double) * nparticles * 3, field, &_err));
-  ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(double) * nparticles, potentials, &_err));
-  ocl->mem_boxes           = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * 4, boxes, &_err));
-  ocl->mem_linkedboxes     = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nreal_neighbours, linked, &_err));
-  ocl->mem_linkedbackboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nreal_neighbours, linkedback, &_err));
+  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles * 3, positions, &_err));
+  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles, charges, &_err));
+  ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles * 3, field, &_err));
+  ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles, potentials, &_err));
+  ocl->mem_boxes           = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * nboxes * 4, boxes, &_err));
+  ocl->mem_linkedboxes     = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * nboxes * nreal_neighbours, linked, &_err));
+  ocl->mem_linkedbackboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * nboxes * nreal_neighbours, linkedback, &_err));
 
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions, CL_FALSE, 0, sizeof(double) * nparticles * 3, positions, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges, CL_FALSE, 0, sizeof(double) * nparticles, charges, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, sizeof(double) * nparticles * 3, field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, sizeof(double) * nparticles, potentials, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, 0, sizeof(int) * nboxes * 4, boxes, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedboxes, CL_FALSE, 0, sizeof(int) * nboxes * nreal_neighbours, linked, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedbackboxes, CL_FALSE, 0, sizeof(int) * nboxes * nreal_neighbours, linkedback, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions, CL_FALSE, 0, sizeof(fcs_float) * nparticles * 3, positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges, CL_FALSE, 0, sizeof(fcs_float) * nparticles, charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, sizeof(fcs_float) * nparticles * 3, field, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, sizeof(fcs_float) * nparticles, potentials, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * 4, boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedboxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * nreal_neighbours, linked, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_linkedbackboxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * nreal_neighbours, linkedback, 0, NULL, NULL));
 
   if (nghosts > 0)
   {
-    ocl->mem_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double) * nghosts * 3, gpositions, &_err));
-    ocl->mem_gcharges   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(double) * nghosts, gcharges, &_err));
-    ocl->mem_gboxes       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * ngboxes * 2, gboxes, &_err));
-    ocl->mem_glinklist    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * 2, glinklist, &_err));
-    ocl->mem_glinkedboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(int) * nboxes * nghost_neighbours, glinked, &_err));
+    ocl->mem_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nghosts * 3, gpositions, &_err));
+    ocl->mem_gcharges   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nghosts, gcharges, &_err));
+    ocl->mem_gboxes       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * ngboxes * 2, gboxes, &_err));
+    ocl->mem_glinklist    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * nboxes * 2, glinklist, &_err));
+    ocl->mem_glinkedboxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_int) * nboxes * nghost_neighbours, glinked, &_err));
 
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, sizeof(double) * nghosts * 3, gpositions, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, sizeof(double) * nghosts, gcharges, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gboxes, CL_FALSE, 0, sizeof(int) * ngboxes * 2, gboxes, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinklist, CL_FALSE, 0, sizeof(int) * nboxes * 2, glinklist, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinkedboxes, CL_FALSE, 0, sizeof(int) * nboxes * nghost_neighbours, glinked, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, sizeof(fcs_float) * nghosts * 3, gpositions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, sizeof(fcs_float) * nghosts, gcharges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gboxes, CL_FALSE, 0, sizeof(fcs_int) * ngboxes * 2, gboxes, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinklist, CL_FALSE, 0, sizeof(fcs_int) * nboxes * 2, glinklist, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinkedboxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * nghost_neighbours, glinked, 0, NULL, NULL));
   }
 
   ocl->program = clCreateProgramWithSource(ocl->context, fcs_ocl_compute_kernel_source_size, fcs_ocl_compute_kernel_source, NULL, &ret);  // FIXME: CL_CHECK_ERR?
@@ -995,8 +1010,8 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
   CL_CHECK(clReleaseEvent(ocl->kernel_completions[0]));
   if (ocl->nkernel_completions > 1) CL_CHECK(clReleaseEvent(ocl->kernel_completions[1]));
 
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, nparticles * 3 * sizeof(double), field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_potentials, CL_TRUE, 0, nparticles * sizeof(double), potentials, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_potentials, CL_TRUE, 0, nparticles * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
 #if 0
   CL_CHECK(clFlush(ocl->command_queue));
@@ -1245,15 +1260,15 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
 #if FCS_ENABLE_OPENCL
 
-  int j;
+  fcs_int j;
 
   near->context->ocl.nboxes = 0;
   near->context->ocl.boxlist = NULL;
   near->context->ocl.linkedboxes = NULL;
   near->context->ocl.linkedboxesback = NULL;
 
-  int *indexlist = malloc(near->nparticles * sizeof(int));
-  int *boxlisttmp = malloc(2 * near->nparticles * sizeof(int));
+  fcs_int *indexlist = malloc(near->nparticles * sizeof(fcs_int));
+  fcs_int *boxlisttmp = malloc(2 * near->nparticles * sizeof(fcs_int));
 
   do {
     current_box = near->context->real_boxes[current_last];
@@ -1265,7 +1280,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     current_last = current_start + current_size;
   } while (current_last < near->nparticles);
 
-  near->context->ocl.boxlist = malloc(4 * near->context->ocl.nboxes * sizeof(int));
+  near->context->ocl.boxlist = malloc(4 * near->context->ocl.nboxes * sizeof(fcs_int));
 
   for (i = 0; i < near->context->ocl.nboxes; i++)
   {
@@ -1277,8 +1292,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
   free(boxlisttmp);
 
-  near->context->ocl.linkedboxes = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(int));
-  near->context->ocl.linkedboxesback = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(int));
+  near->context->ocl.linkedboxes = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
+  near->context->ocl.linkedboxesback = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
 
   for (i = 0; i < near->context->ocl.nboxes; i++)
   {
@@ -1288,7 +1303,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     {
       if (real_sizes[j] > 0)
       {
-        int current_box_index = indexlist[real_starts[j]];
+        fcs_int current_box_index = indexlist[real_starts[j]];
         near->context->ocl.linkedboxes[(nreal_neighbours * i) + near->context->ocl.boxlist[4 * i + 2]] = current_box_index;
         near->context->ocl.boxlist[4 * i + 2]++;
         near->context->ocl.linkedboxesback[nreal_neighbours * current_box_index + (near->context->ocl.boxlist[4 * current_box_index + 3])] = i;
@@ -1308,8 +1323,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
   if (near->context->ghost_boxes)
   {
-    int *ghostindexlist = malloc(near->nghosts * sizeof(int));
-    int *ghostboxlisttmp = malloc( 2 * near->nghosts * sizeof(int));
+    fcs_int *ghostindexlist = malloc(near->nghosts * sizeof(fcs_int));
+    fcs_int *ghostboxlisttmp = malloc( 2 * near->nghosts * sizeof(fcs_int));
 
     current_last = 0;
     do {
@@ -1323,7 +1338,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
     } while (current_last < near->nghosts);
 
-    near->context->ocl.ghostboxlist = malloc(2 * near->context->ocl.nghostboxes * sizeof(int));
+    near->context->ocl.ghostboxlist = malloc(2 * near->context->ocl.nghostboxes * sizeof(fcs_int));
     for (i = 0; i< near->context->ocl.nghostboxes; i++)
     {
       near->context->ocl.ghostboxlist[2 * i + 0] = ghostboxlisttmp[2 * i + 0];
@@ -1332,8 +1347,8 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
     free(ghostboxlisttmp);
 
-    near->context->ocl.ghostlinked = malloc(2 * near->context->ocl.nboxes * sizeof(int));
-    near->context->ocl.ghostlinkedboxes = malloc(nghost_neighbours * near->context->ocl.nboxes * sizeof(int));  
+    near->context->ocl.ghostlinked = malloc(2 * near->context->ocl.nboxes * sizeof(fcs_int));
+    near->context->ocl.ghostlinkedboxes = malloc(nghost_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));  
 
     for (i = 0; i < near->context->ocl.nboxes; i++)
     {
