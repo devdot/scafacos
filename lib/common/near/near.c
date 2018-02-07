@@ -725,7 +725,7 @@ static const char *fcs_ocl_compute_kernel_source_head =
   ;
 
 static const char *fcs_ocl_compute_kernel_source_compute =
-  "static void coulomb_field_potential(const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
+  "static void coulomb_field_potential(__global const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
   "{\n"
   "  *p = 1.0 / dist;\n"
   "  *f = -(*p) * (*p);\n"
@@ -734,7 +734,7 @@ static const char *fcs_ocl_compute_kernel_source_compute =
 static const char *fcs_ocl_compute_kernel_source_compute_function = "coulomb_field_potential";
 
 static const char *fcs_ocl_compute_kernel_source =
-  "__kernel void compute_box_real(fcs_float cutoff, __global const void *param, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked, __global fcs_int *linkedback)\n"
+  "__kernel void compute_box_real(fcs_float cutoff, __global void *param, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked, __global fcs_int *linkedback)\n"
   "{\n"
   "  fcs_float r_ij, f, p, fx;"
   "  fcs_float ax, ay, az, aa, ab, ac;\n"
@@ -960,7 +960,7 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, const char *nfp_source, cons
   if (ret != CL_SUCCESS)
   {
     size_t length;
-    char buffer[2048];
+    char buffer[32*1024];
     clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
     printf("clGetProgramBuildInfo: %.*s\n", (int) length, buffer);
     return 1;
