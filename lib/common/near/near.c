@@ -775,10 +775,6 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 }
 
 
-#define KERNEL_INBOX       1
-#define KERNEL_LINKED      1
-#define KERNEL_LINKEDBACK  1
-
 static const char *fcs_ocl_compute_kernel_source_head =
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
   "\n"
@@ -833,7 +829,6 @@ static const char *fcs_ocl_compute_kernel_source =
   "    ax = positions[3 * a + 0];\n"
   "    ay = positions[3 * a + 1];\n"
   "    az = positions[3 * a + 2];\n"
-#if KERNEL_INBOX
   "    for ( m=0; m<boxes[i*4+1]; m++)\n"
   "    {\n"
   "      b = boxes[i * 4] + m;\n"
@@ -856,9 +851,7 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
-#endif /* KERNEL_INBOX */
   "\n"
-#if KERNEL_LINKED
   "    for (m=0;m<boxes[4*i+2]; m++)\n"
   "    {\n"
   "      lb = linked[i * 13 + m];\n"
@@ -882,9 +875,7 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
-#endif /* KERNEL_LINKED */
   "\n"
-#if KERNEL_LINKEDBACK
   "    for (m=0;m<boxes[4*i+3]; m++)\n"
   "    {\n"
   "      lb = linkedback[i * 13 + m];\n"
@@ -908,7 +899,6 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
-#endif /* KERNEL_LINKEDBACK */
   "    field[3 * a + 0] += fs_x;\n"
   "    field[3 * a + 1] += fs_y;\n"
   "    field[3 * a + 2] += fs_z;\n"
@@ -918,44 +908,48 @@ static const char *fcs_ocl_compute_kernel_source =
   "\n"
   "__kernel void compute_box_ghosts(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
   "{\n"
-  "  fcs_float ax,ay,az,aa,ab,ac,dis,dis3,erg,fergx,fergy,fergz;\n"
+  "  fcs_float r_ij, f, p, fx;"
+  "  void *param = 0;"
+  "  fcs_float ax, ay, az, aa, ab, ac;\n"
+  "  fcs_float fs_x, fs_y, fs_z, ps;"
   "  size_t i = get_global_id(0);\n"
   "  fcs_int j,m,n,lb,a,b;\n"
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
-  "    erg=0;  \n"
-  "    fergx=0;\n"
-  "    fergy=0;\n"
-  "    fergz=0;\n"
-  "    a=boxes[4*i]+j;\n"
-  "    ax=positions[(3*a)];\n"
-  "    ay=positions[(3*a)+1];\n"
-  "    az=positions[(3*a)+2];\n"
+  "    fs_x = fs_y = fs_z = 0;\n"
+  "    ps = 0;\n"
+  "    a = boxes[4 * i] + j;\n"
+  "    ax = positions[3 * a + 0];\n"
+  "    ay = positions[3 * a + 1];\n"
+  "    az = positions[3 * a + 2];\n"
   "\n"
   "    for (m=0;m<glinklist[2*i]; m++)\n"
   "    {\n"
-  "      lb=linked[27*i+m];\n"
+  "      lb = linked[27 * i + m];\n"
   "      for (n=0;n<gboxes[2*lb+1];n++)\n"
   "      {\n"
   "        b=gboxes[2*lb]+n;\n"
-  "        aa = ax - gpositions[3*b];\n"
-  "        ab = ay - gpositions[3*b+1];\n"
-  "        ac = az - gpositions[3*b+2];\n"
-  "        dis = fcs_sqrt((aa*aa)+(ab*ab)+(ac*ac));\n"
-  "        if (dis>cutoff)\n"
-  "        {\n"
-  "          dis3= dis*dis*dis;\n"
-  "          fergx= fergx - (gcharges[b] * (aa/dis3));\n"
-  "          fergy= fergy - (gcharges[b] * (ab/dis3));\n"
-  "          fergz= fergz - (gcharges[b] * (ac/dis3));\n"
-  "          erg= erg + (gcharges[b] / dis);\n"
-  "        }  \n"
-  "      }    \n"
+  "        aa = gpositions[3 * b + 0] - ax;\n"
+  "        ab = gpositions[3 * b + 1] - ay;\n"
+  "        ac = gpositions[3 * b + 2] - az;\n"
+  "        r_ij = fcs_sqrt((aa * aa) + (ab * ab) + (ac * ac));\n"
+  "        if (r_ij > cutoff) continue;\n"
+  "        _nfp_(param, r_ij, &f, &p);\n"
+  "        fx = f * gcharges[b] / r_ij;\n"
+  "        fs_x += fx * aa;\n"
+  "        fs_y += fx * ab;\n"
+  "        fs_z += fx * ac;\n"
+#if POTENTIAL_CONST1
+  "        ps += 1;\n"
+#else
+  "        ps += p * gcharges[b];\n"
+#endif
+  "      }\n"
   "    }\n"
-  "    field[(3*a)]=field[(3*a)]+fergx;\n"
-  "    field[3*a+1]=field[((3*a)+1)]+fergy;\n"
-  "    field[3*a+2]=field[((3*a)+2)]+fergz;\n"
-  "    pots[a]=pots[a] + erg;\n"
+  "    field[3 * a + 0] += fs_x;\n"
+  "    field[3 * a + 1] += fs_y;\n"
+  "    field[3 * a + 2] += fs_z;\n"
+  "    pots[a] += ps;\n"
   "  } \n"
   "}\n"
   ;
