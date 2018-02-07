@@ -221,7 +221,7 @@ void fcs_near_set_resort(fcs_near_t *near, fcs_int resort);
 fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm);
 
 /**
- * @brief asynchronous compute near field interactions with the given "gridsorted" particles,
+ * @brief prepare asynchronous compute of near field interactions with the given "gridsorted" particles,
  * particle values (positions, charges, field, potentials and gridsort-indices) get rearranged!
  * @param near fcs_near_t* near field solver object
  * @param cutoff fcs_float cutoff range
@@ -229,7 +229,15 @@ fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute
  * @param comm MPI_Comm MPI communicator to use, has to be Cartesian if periodicity was not set with fcs_near_set_system
  * @return fcs_int zero if successful, otherwise less than zero
  */
-fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm);
+fcs_int fcs_near_compute_prepare(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm);
+
+/**
+ * @brief asynchronous compute of near field interactions with the given "gridsorted" particles,
+ * particle values (positions, charges, field, potentials and gridsort-indices) get rearranged!
+ * @param near fcs_near_t* near field solver object
+ * @return fcs_int zero if successful, otherwise less than zero
+ */
+fcs_int fcs_near_compute_start(fcs_near_t *near);
 
 /**
  * @brief wait for finish of asynchronous compute
@@ -237,6 +245,13 @@ fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *c
  * @return fcs_int zero if successful, otherwise less than zero
  */
 fcs_int fcs_near_compute_join(fcs_near_t *near);
+
+/**
+ * @brief finish asynchronous compute
+ * @param near fcs_near_t* near field solver object
+ * @return fcs_int zero if successful, otherwise less than zero
+ */
+fcs_int fcs_near_compute_finish(fcs_near_t *near);
 
 /**
  * @brief create near_resort object from given near field solver object

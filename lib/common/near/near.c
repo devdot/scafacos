@@ -65,10 +65,10 @@
 #else
 #include <CL/cl.h>
 #endif
-   
+
 #define MEM_SIZE (128)
 #define MAX_SOURCE_SIZE (0xFFFFFF)
-     
+
 #define CL_CHECK(_expr)                                                     \
 do {                                                                        \
   cl_int _err = _expr;                                                      \
@@ -420,8 +420,8 @@ void fcs_near_set_field_potential_source(fcs_near_t *near, const char *compute_f
 void fcs_near_set_system(fcs_near_t *near, const fcs_float *box_base, const fcs_float *box_a, const fcs_float *box_b, const fcs_float *box_c, const fcs_int *periodicity)
 {
   fcs_int i;
-  
-  
+
+
   for (i = 0; i < 3; ++i)
   {
     near->box_base[i] = box_base[i];
@@ -488,9 +488,9 @@ static void print_particles(fcs_int n, fcs_float *xyz, int size, int rank, MPI_C
       if (i == root) MPI_Sendrecv(xyz, 3 * n, FCS_MPI_FLOAT, root, 0, in_xyz, 3 * max_n, FCS_MPI_FLOAT, root, 0, comm, &status);
       else MPI_Recv(in_xyz, 3 * max_n, FCS_MPI_FLOAT, i, 0, comm, &status);
       MPI_Get_count(&status, FCS_MPI_FLOAT, &in_count);
-      
+
       in_count /= 3;
-      
+
       for (j = 0; j < in_count; ++j) printf("%" FCS_LMOD_INT "d  %" FCS_LMOD_FLOAT "f  %" FCS_LMOD_FLOAT "f  %" FCS_LMOD_FLOAT "f\n", i, in_xyz[j * 3 + 0], in_xyz[j * 3 + 1], in_xyz[j * 3 + 2]);
     }
 
@@ -498,7 +498,7 @@ static void print_particles(fcs_int n, fcs_float *xyz, int size, int rank, MPI_C
   {
     MPI_Send(xyz, 3 * n, FCS_MPI_FLOAT, root, 0, comm);
   }
-  
+
   free(in_xyz);
 }
 #endif
@@ -665,12 +665,12 @@ static void find_box(box_t *boxes, fcs_int max, box_t box, fcs_int low, fcs_int 
 
   /* forward search for start  */
   while (low < max && boxes[low] < box) low = BOX_NEXT(boxes, low);
-  
+
   *start = low;
 
   /* search for end */
   while (low < max && boxes[low] == box) low = BOX_NEXT(boxes, low);
-  
+
   *size = low - *start;
 
 /*  printf("  -> %" FCS_LMOD_INT "d / %" FCS_LMOD_INT "d\n", *start, *size);*/
@@ -688,7 +688,7 @@ static void find_neighbours(fcs_int nneighbours, fcs_int *neighbours, box_t *box
     nbox = BOX_ADD(box, neighbours[3 * i + 0], neighbours[3 * i + 1], neighbours[3 * i + 2]);
 
     find_box(boxes, max, nbox, lasts[i], &starts[i], &sizes[i]);
-    
+
 /*    printf("  neighbour %" FCS_LMOD_INT "d: " box_fmt " -> %" FCS_LMOD_INT "d,%" FCS_LMOD_INT "d,%" FCS_LMOD_INT "d\n", i, box_val(nbox), lasts[i], starts[i], sizes[i]);*/
   }
 }
@@ -926,7 +926,7 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, const char *nfp_source, cons
 #endif
       1, &ocl->device_id, &ret_num_devices);
     ++d;
-    
+
   } while (ret != CL_SUCCESS && d < ret_num_platforms);
 
   free(platform_ids);
@@ -1277,22 +1277,6 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
     }
   );
 
-  return 0;
-}
-
-
-static fcs_int near_compute_main_start(fcs_near_t *near)
-{
-  fcs_int i;
-  box_t current_box;
-  fcs_int current_last, current_start, current_size;
-  fcs_int real_lasts[max_nboxes], real_starts[max_nboxes], real_sizes[max_nboxes];
-  fcs_int ghost_lasts[max_nboxes], ghost_starts[max_nboxes], ghost_sizes[max_nboxes];
-
-#ifdef DO_TIMING
-  double _t, *t = near->context->t;
-#endif
-
   near->context->real_boxes = malloc((near->nparticles + 1) * sizeof(box_t)); /* + 1 for a sentinel */
   if (near->nghosts > 0) near->context->ghost_boxes = malloc((near->nghosts + 1) * sizeof(box_t)); /* + 1 for a sentinel */
   else near->context->ghost_boxes = NULL;
@@ -1328,6 +1312,22 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
 /*  for (i = 0; i < nlocal_particles; ++i)
     printf("%" FCS_LMOD_INT "d: %f,%f,%f  " box_fmt "  %lld\n", i, positions[3 * i + 0], positions[3 * i + 1], positions[3 * i + 2], box_val(&boxes[3 * i]), indices[i]);*/
+
+  return 0;
+}
+
+
+static fcs_int near_compute_main_start(fcs_near_t *near)
+{
+  fcs_int i;
+  box_t current_box;
+  fcs_int current_last, current_start, current_size;
+  fcs_int real_lasts[max_nboxes], real_starts[max_nboxes], real_sizes[max_nboxes];
+  fcs_int ghost_lasts[max_nboxes], ghost_starts[max_nboxes], ghost_sizes[max_nboxes];
+
+#ifdef DO_TIMING
+  double _t, *t = near->context->t;
+#endif
 
   current_last = 0;
   for (i = 0; i < max_nboxes; ++i) real_lasts[i] = ghost_lasts[i] = 0;
@@ -1424,7 +1424,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     free(ghostboxlisttmp);
 
     near->context->ocl.ghostlinked = malloc(2 * near->context->ocl.nboxes * sizeof(fcs_int));
-    near->context->ocl.ghostlinkedboxes = malloc(nghost_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));  
+    near->context->ocl.ghostlinkedboxes = malloc(nghost_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
 
     for (i = 0; i < near->context->ocl.nboxes; i++)
     {
@@ -1650,7 +1650,7 @@ static fcs_int near_compute_release(fcs_near_t *near)
 
 fcs_int fcs_near_compute(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
 {
-  fcs_int ret = 0;
+  fcs_int ret;
 
   ret = near_compute_init(near, cutoff, compute_param, comm);
   if (ret) goto exit;
@@ -1669,35 +1669,27 @@ exit:
 }
 
 
-fcs_int fcs_near_compute_start(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
+fcs_int fcs_near_compute_prepare(fcs_near_t *near, fcs_float cutoff, const void *compute_param, MPI_Comm comm)
 {
-  fcs_int ret;
+  return near_compute_init(near, cutoff, compute_param, comm);
+}
 
-  ret = near_compute_init(near, cutoff, compute_param, comm);
-  if (ret) goto exit;
 
-  ret = near_compute_start(near, 1);
-  if (ret) goto free_exit;
-
-  goto exit;
-
-free_exit:
-  ret = ret || near_compute_release(near);
-
-exit:
-  return ret;
+fcs_int fcs_near_compute_start(fcs_near_t *near)
+{
+  return near_compute_start(near, 1);
 }
 
 
 fcs_int fcs_near_compute_join(fcs_near_t *near)
 {
-  fcs_int ret;
+  return near_compute_join(near);
+}
 
-  ret = near_compute_join(near);
 
-  ret = ret || near_compute_release(near);
-
-  return ret;
+fcs_int fcs_near_compute_finish(fcs_near_t *near)
+{
+  return near_compute_release(near);
 }
 
 
@@ -1727,7 +1719,7 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
   fcs_int nlocal_s_real;
   fcs_float *positions_s_real, *charges_s_real;
   fcs_gridsort_index_t *indices_s_real;
-  
+
   fcs_int resort;
 
 #ifdef SEPARATE_GHOSTS
@@ -1804,7 +1796,7 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
   }*/
 
   fcs_gridsort_create(&gridsort);
-  
+
   fcs_gridsort_set_system(&gridsort, near->box_base, near->box_a, near->box_b, near->box_c, periodicity);
 
 #ifdef SORT_FORWARD_BOUNDS
@@ -1813,7 +1805,7 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
   lower_bounds[0] = near->box_base[0] + (fcs_float) cart_coords[0] * near->box_a[0] / (fcs_float) cart_dims[0];
   lower_bounds[1] = near->box_base[1] + (fcs_float) cart_coords[1] * near->box_b[1] / (fcs_float) cart_dims[1];
   lower_bounds[2] = near->box_base[2] + (fcs_float) cart_coords[2] * near->box_c[2] / (fcs_float) cart_dims[2];
-  
+
   upper_bounds[0] = near->box_base[0] + (fcs_float) (cart_coords[0] + 1.0) * near->box_a[0] / (fcs_float) cart_dims[0];
   upper_bounds[1] = near->box_base[1] + (fcs_float) (cart_coords[1] + 1.0) * near->box_b[1] / (fcs_float) cart_dims[1];
   upper_bounds[2] = near->box_base[2] + (fcs_float) (cart_coords[2] + 1.0) * near->box_c[2] / (fcs_float) cart_dims[2];
@@ -1965,7 +1957,7 @@ void fcs_near_resort_create(fcs_near_resort_t *near_resort, fcs_near_t *near)
 void fcs_near_resort_destroy(fcs_near_resort_t *near_resort)
 {
   fcs_gridsort_resort_destroy(near_resort);
-  
+
   *near_resort = FCS_NEAR_RESORT_NULL;
 }
 
