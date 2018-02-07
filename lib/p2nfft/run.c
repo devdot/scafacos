@@ -191,9 +191,15 @@ FCSResult ifcs_p2nfft_run(
     for (fcs_int j = 0; j < 3 * sorted_num_particles; ++j)
       sorted_field[j] = 0;
 
+  ifcs_p2nfft_near_params near_params;
+  fcs_float *near_sorted_field = sorted_field;
+  fcs_float *near_sorted_potential = sorted_potential;
+
   if(d->short_range_flag){
     fcs_near_create(&near);
   
+    void *compute_param = NULL;
+
     if(d->interpolation_order >= 0){
       switch(d->interpolation_order){
         case 0: fcs_near_set_loop(&near, ifcs_p2nfft_compute_near_interpolation_const_loop); break;
@@ -202,6 +208,13 @@ FCSResult ifcs_p2nfft_run(
         case 3: fcs_near_set_loop(&near, ifcs_p2nfft_compute_near_interpolation_cub_loop); break;
         default: return fcs_result_create(FCS_ERROR_WRONG_ARGUMENT, fnc_name,"P2NFFT interpolation order is too large.");
       } 
+      near_params.interpolation_order = d->interpolation_order;
+      near_params.interpolation_num_nodes = d->near_interpolation_num_nodes;
+      near_params.near_interpolation_table_potential = d->near_interpolation_table_potential;
+      near_params.near_interpolation_table_force = d->near_interpolation_table_force;
+      near_params.one_over_r_cut = d->one_over_r_cut;
+
+      compute_param = &near_params;
     } else if(d->reg_kernel == FCS_P2NFFT_REG_KERNEL_EWALD) {
       if(d->interpolation_order == -1) {
         fcs_near_set_loop(&near, ifcs_p2nfft_compute_near_periodic_erfc_loop);
@@ -212,35 +225,47 @@ FCSResult ifcs_p2nfft_run(
         fcs_near_set_field_potential_source(&near, ifcs_p2nfft_near_compute_source, "ifcs_p2nfft_compute_near_periodic_approx_erfc");
         fcs_near_set_compute_param_size(&near, sizeof(fcs_float));
       }
+      compute_param = &d->alpha;
     } else {
       fcs_near_set_field(&near, ifcs_p2nfft_compute_near_field);
       fcs_near_set_potential(&near, ifcs_p2nfft_compute_near_potential);
+      compute_param = rd;
     }
 
     // fcs_int *periodicity = NULL; /* sorter uses periodicity of the communicator */
     fcs_near_set_system(&near, d->box_base, d->box_a, d->box_b, d->box_c, d->periodicity);
   
+    if (d->async_near)
+    {
+      near_sorted_field     = (compute_field)     ? malloc(sizeof(fcs_float)*3*sorted_num_particles) : NULL;
+      near_sorted_potential = (compute_potential) ? malloc(sizeof(fcs_float)*sorted_num_particles) : NULL;
+
+      if(compute_potential)
+        for (fcs_int j = 0; j < sorted_num_particles; ++j)
+          near_sorted_potential[j] = 0;
+
+      if(compute_field)
+        for (fcs_int j = 0; j < 3 * sorted_num_particles; ++j)
+          near_sorted_field[j] = 0;
+    }
+
     fcs_near_set_particles(&near, sorted_num_particles, sorted_num_particles, sorted_positions, sorted_charges, sorted_indices,
-        (compute_field)?sorted_field:NULL, (compute_potential)?sorted_potential:NULL);
+      near_sorted_field, near_sorted_potential);
   
     fcs_near_set_ghosts(&near, ghost_num_particles, ghost_positions, ghost_charges, ghost_indices);
-  
-    if(d->interpolation_order >= 0){
-      ifcs_p2nfft_near_params near_params;
-      near_params.interpolation_order = d->interpolation_order;
-      near_params.interpolation_num_nodes = d->near_interpolation_num_nodes;
-      near_params.near_interpolation_table_potential = d->near_interpolation_table_potential;
-      near_params.near_interpolation_table_force = d->near_interpolation_table_force;
-      near_params.one_over_r_cut = d->one_over_r_cut;
 
-      fcs_near_compute(&near, d->r_cut, &near_params, d->cart_comm_3d);
-    } else if(d->reg_kernel == FCS_P2NFFT_REG_KERNEL_EWALD)
-      fcs_near_compute(&near, d->r_cut, &(d->alpha), d->cart_comm_3d);
-    else
-      fcs_near_compute(&near, d->r_cut, rd, d->cart_comm_3d);
-  
-    fcs_near_destroy(&near);
+    if (d->async_near)
+    {
+      fcs_near_compute_prepare(&near, d->r_cut, compute_param, d->cart_comm_3d);
 
+      fcs_near_compute_start(&near);
+  
+    } else
+    {
+      fcs_near_compute(&near, d->r_cut, compute_param, d->cart_comm_3d);
+
+      fcs_near_destroy(&near);
+    }
   }
 
   /* Finish near field timing */
@@ -429,9 +454,11 @@ FCSResult ifcs_p2nfft_run(
     FCS_PNFFT(direct_trafo)(d->pnfft);
 
   /* Copy the results to the output vector and rescale with L^{-T} */
-  if(compute_potential)
-    for (fcs_int j = 0; j < sorted_num_particles; ++j)
-      sorted_potential[j] += creal(f[j]);
+  if(compute_potential){
+    for (fcs_int j = 0; j < sorted_num_particles; ++j){
+      sorted_potential[j] += fcs_creal(f[j]);
+    }
+  }
 
   if(compute_field){
     for (fcs_int j = 0; j < sorted_num_particles; ++j){
@@ -490,6 +517,29 @@ FCSResult ifcs_p2nfft_run(
 
   /* Finish self interaction timing */
   FCS_P2NFFT_FINISH_TIMING(d->cart_comm_3d, "self interaction calculation");
+
+  if(d->short_range_flag && d->async_near){
+    fcs_near_compute_join(&near);
+    fcs_near_compute_finish(&near);
+
+    if(compute_potential){
+      for (fcs_int j = 0; j < sorted_num_particles; ++j){
+        sorted_potential[j] += near_sorted_potential[j];
+      }
+      free(near_sorted_potential);
+    }
+
+    if(compute_field){
+      for (fcs_int j = 0; j < sorted_num_particles; ++j){
+        sorted_field[3 * j + 0] += near_sorted_field[3 * j + 0];
+        sorted_field[3 * j + 1] += near_sorted_field[3 * j + 1];
+        sorted_field[3 * j + 2] += near_sorted_field[3 * j + 2];
+      }
+      free(near_sorted_field);
+    }
+
+    fcs_near_destroy(&near);
+  }
 
   /* Calculate virial if needed */
   if(d->virial != NULL){

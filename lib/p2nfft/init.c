@@ -158,6 +158,7 @@ FCSResult ifcs_p2nfft_init(
   comm_get_periodicity(comm, d->periodicity);
 
   d->short_range_flag = -1;
+  d->async_near = 0;
   d->reg_near = FCS_P2NFFT_REG_NEAR_DEFAULT;
   d->reg_far  = FCS_P2NFFT_REG_FAR_DEFAULT;
   d->reg_kernel   = FCS_P2NFFT_REG_KERNEL_DEFAULT;
@@ -412,4 +413,3 @@ static void calc_grid_sizes(
   }
 #endif
 }
-

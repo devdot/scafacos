@@ -210,6 +210,7 @@ typedef struct {
   fcs_int  pfft_patience;
 
   fcs_int short_range_flag;
+  fcs_int async_near;
   fcs_int reg_near;
   fcs_int reg_far;
   fcs_int reg_kernel;
