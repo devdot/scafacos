@@ -45,6 +45,16 @@ libfcs_p2nfft_la_SOURCES = \
 	cg_cos_coeff_sym.c cg_cos_coeff_sym.h \
 	cg_cos_err_sym.c cg_cos_err_sym.h
 
+nodist_libfcs_p2nfft_la_SOURCES = nearfield_ocl_source.h
+BUILT_SOURCES = nearfield_ocl_source.h
+CLEANFILES = nearfield_ocl_source.h
+
+nearfield_ocl_source.h: $(srcdir)/nearfield_ocl.h Makefile
+	$(CPP) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libfcs_p2nfft_la_CPPFLAGS) $(CPPFLAGS) $< \
+	| sed -e '1,/typedef void HERE_COMES_THE_CODE;/d' \
+	| hexdump -v -e '16/1 "0x%02x, " "\n"' \
+	| sed -e 's/0x  ,/0x00,/g' -e '1s/^/const char ifcs_p2nfft_near_compute_source[] = { /' -e '$$s/$$/ 0x00 };/' > $@
+
 #noinst_PROGRAMS = tests/test_random
 #tests_test_random_SOURCES = tests/test_random.c
 #tests_test_random_LDADD = libfcs_p2nfft.a \
