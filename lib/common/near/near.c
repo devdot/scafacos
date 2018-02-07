@@ -696,85 +696,6 @@ static void find_neighbours(fcs_int nneighbours, fcs_int *neighbours, box_t *box
 
 #if FCS_ENABLE_OPENCL
 
-typedef struct
-{
-  fcs_int nboxes;
-  fcs_int *boxlist, *linkedboxes, *linkedboxesback;
-
-  fcs_int nghostboxes;
-  fcs_int *ghostboxlist, *ghostlinked, *ghostlinkedboxes;
-
-  cl_context context;
-  cl_command_queue command_queue;
-  cl_device_id device_id;
-
-  cl_program program;
-  cl_kernel kernel_real, kernel_ghosts;
-
-  cl_mem mem_positions, mem_charges, mem_field, mem_potentials;
-  cl_mem mem_boxes, mem_linkedboxes, mem_linkedbackboxes;
-
-  cl_mem mem_gpositions, mem_gcharges;
-  cl_mem mem_gboxes, mem_glinklist, mem_glinkedboxes;
-
-  int nkernel_completions;
-  cl_event kernel_completions[2];
-
-} fcs_ocl_context_t;
-
-
-static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl)
-{
-  /*  Initialiseriung  */
-  cl_int ret;
-  cl_uint ret_num_platforms;
-  cl_uint ret_num_devices;
-
-  /*  Platform und Device Informationen abrufen  */
-  ret = clGetPlatformIDs(0, NULL, &ret_num_platforms);
-  cl_platform_id *platform_ids = malloc(ret_num_platforms * sizeof(cl_platform_id));
-  ret = clGetPlatformIDs(ret_num_platforms, platform_ids, NULL);
-
-  ret = CL_DEVICE_NOT_FOUND;
-  int d = 0;
-  do {
-    ret = clGetDeviceIDs(platform_ids[d],
-#if FCS_ENABLE_OPENCL_CPU
-      CL_DEVICE_TYPE_CPU,
-#else
-      CL_DEVICE_TYPE_GPU,
-#endif
-      1, &ocl->device_id, &ret_num_devices);
-    ++d;
-    
-  } while (ret != CL_SUCCESS && d < ret_num_platforms);
-
-  free(platform_ids);
-
-  if (ret != CL_SUCCESS) return 1;
-
-  /*  Context und Command Queue erzeugen  */
-  ocl->context = clCreateContext(NULL, 1, &ocl->device_id, NULL, NULL, &ret);
-  ocl->command_queue = clCreateCommandQueue(ocl->context, ocl->device_id, 0, &ret);
-
-  return 0;
-}
-
-
-static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
-{
-  cl_int ret;
-
-  ret = clReleaseCommandQueue(ocl->command_queue);
-  if (ret != CL_SUCCESS) return 1;
-
-  ret = clReleaseContext(ocl->context);
-  if (ret != CL_SUCCESS) return 1;
-
-  return 0;
-}
-
-
 static const char *fcs_ocl_compute_kernel_source_head =
   "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
   "\n"
@@ -813,10 +734,9 @@ static const char *fcs_ocl_compute_kernel_source_compute =
 static const char *fcs_ocl_compute_kernel_source_compute_function = "coulomb_field_potential";
 
 static const char *fcs_ocl_compute_kernel_source =
-  "__kernel void compute_box_real(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked,__global fcs_int *linkedback)\n"
+  "__kernel void compute_box_real(fcs_float cutoff, __global const void *param, __global fcs_float *positions, __global fcs_float *charges, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_int *linked, __global fcs_int *linkedback)\n"
   "{\n"
   "  fcs_float r_ij, f, p, fx;"
-  "  void *param = 0;"
   "  fcs_float ax, ay, az, aa, ab, ac;\n"
   "  fcs_float fs_x, fs_y, fs_z, ps;"
   "  size_t i = get_global_id(0);\n"
@@ -906,10 +826,9 @@ static const char *fcs_ocl_compute_kernel_source =
   "  }\n"
   "}\n"
   "\n"
-  "__kernel void compute_box_ghosts(fcs_float cutoff, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
+  "__kernel void compute_box_ghosts(fcs_float cutoff, __global const void *param, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
   "{\n"
   "  fcs_float r_ij, f, p, fx;"
-  "  void *param = 0;"
   "  fcs_float ax, ay, az, aa, ab, ac;\n"
   "  fcs_float fs_x, fs_y, fs_z, ps;"
   "  size_t i = get_global_id(0);\n"
@@ -954,13 +873,145 @@ static const char *fcs_ocl_compute_kernel_source =
   "}\n"
   ;
 
-static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const char *nfp_source, const char *nfp_function,
+
+typedef struct
+{
+  fcs_int nboxes;
+  fcs_int *boxlist, *linkedboxes, *linkedboxesback;
+
+  fcs_int nghostboxes;
+  fcs_int *ghostboxlist, *ghostlinked, *ghostlinkedboxes;
+
+  cl_device_id device_id;
+  cl_context context;
+  cl_command_queue command_queue;
+
+  cl_program program;
+  cl_kernel kernel_real, kernel_ghosts;
+
+  cl_mem mem_param;
+
+  cl_mem mem_positions, mem_charges, mem_field, mem_potentials;
+  cl_mem mem_boxes, mem_linkedboxes, mem_linkedbackboxes;
+
+  cl_mem mem_gpositions, mem_gcharges;
+  cl_mem mem_gboxes, mem_glinklist, mem_glinkedboxes;
+
+  int nkernel_completions;
+  cl_event kernel_completions[2];
+
+} fcs_ocl_context_t;
+
+
+static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, const char *nfp_source, const char *nfp_function)
+{
+  /*  Initialiseriung  */
+  cl_int ret;
+  cl_uint ret_num_platforms;
+  cl_uint ret_num_devices;
+
+  /*  Platform und Device Informationen abrufen  */
+  ret = clGetPlatformIDs(0, NULL, &ret_num_platforms);
+  cl_platform_id *platform_ids = malloc(ret_num_platforms * sizeof(cl_platform_id));
+  ret = clGetPlatformIDs(ret_num_platforms, platform_ids, NULL);
+
+  ret = CL_DEVICE_NOT_FOUND;
+  int d = 0;
+  do {
+    ret = clGetDeviceIDs(platform_ids[d],
+#if FCS_ENABLE_OPENCL_CPU
+      CL_DEVICE_TYPE_CPU,
+#else
+      CL_DEVICE_TYPE_GPU,
+#endif
+      1, &ocl->device_id, &ret_num_devices);
+    ++d;
+    
+  } while (ret != CL_SUCCESS && d < ret_num_platforms);
+
+  free(platform_ids);
+
+  if (ret != CL_SUCCESS) return 1;
+
+  ocl->context = clCreateContext(NULL, 1, &ocl->device_id, NULL, NULL, &ret);
+  if (ret != CL_SUCCESS) return 1;
+
+  ocl->command_queue = clCreateCommandQueue(ocl->context, ocl->device_id, 0, &ret);
+  if (ret != CL_SUCCESS) return 1;
+
+  const char *sources[] = {
+    fcs_ocl_compute_kernel_source_head,
+    fcs_ocl_compute_kernel_source_compute,
+    "#define _nfp_  ", fcs_ocl_compute_kernel_source_compute_function, "\n",
+    fcs_ocl_compute_kernel_source
+  };
+  const cl_uint nsources = sizeof(sources) / sizeof(sources[0]);
+
+  if (nfp_source && nfp_function)
+  {
+    sources[1] = nfp_source;
+    sources[3] = nfp_function;
+  }
+
+  ocl->program = clCreateProgramWithSource(ocl->context, nsources, sources, NULL, &ret);
+  if (ret != CL_SUCCESS) return 1;  // FIXME: CL_CHECK_ERR?
+
+  ret = clBuildProgram(ocl->program, 1, &ocl->device_id, NULL, NULL, NULL);
+  if (ret != CL_SUCCESS)
+  {
+    size_t length;
+    char buffer[2048];
+    clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    printf("clGetProgramBuildInfo: %.*s\n", (int) length, buffer);
+    return 1;
+  }
+
+  ocl->kernel_real = clCreateKernel(ocl->program, "compute_box_real", &ret);
+  if (ret != CL_SUCCESS) return 1;
+
+  ocl->kernel_ghosts = clCreateKernel(ocl->program, "compute_box_ghosts", &ret);
+  if (ret != CL_SUCCESS) return 1;
+
+  return 0;
+}
+
+
+static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
+{
+  cl_int ret;
+
+  ret = clReleaseKernel(ocl->kernel_real);
+  if (ret != CL_SUCCESS) return 1;
+
+  ret = clReleaseKernel(ocl->kernel_ghosts);
+  if (ret != CL_SUCCESS) return 1;
+
+  ret = clReleaseProgram(ocl->program);
+  if (ret != CL_SUCCESS) return 1;
+
+  ret = clReleaseCommandQueue(ocl->command_queue);
+  if (ret != CL_SUCCESS) return 1;
+
+  ret = clReleaseContext(ocl->context);
+  if (ret != CL_SUCCESS) return 1;
+
+  return 0;
+}
+
+
+static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const void *compute_param, fcs_int compute_param_size,
   fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
   fcs_int nboxes, fcs_int *boxes, fcs_int *linked, fcs_int *linkedback,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
   fcs_int ngboxes, fcs_int *gboxes, fcs_int *glinklist, fcs_int *glinked)
 {
-  cl_int ret;
+  if (compute_param_size > 0)
+  {
+    ocl->mem_param  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, compute_param_size, (void *) compute_param, &_err));
+
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_param, CL_FALSE, 0, compute_param_size, compute_param, 0, NULL, NULL));
+
+  } else ocl->mem_param = NULL;
 
   ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles * 3, positions, &_err));
   ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(fcs_float) * nparticles, charges, &_err));
@@ -993,39 +1044,15 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_glinkedboxes, CL_FALSE, 0, sizeof(fcs_int) * nboxes * nghost_neighbours, glinked, 0, NULL, NULL));
   }
 
-  const char *sources[] = {
-    fcs_ocl_compute_kernel_source_head,
-    fcs_ocl_compute_kernel_source_compute,
-    "#define _nfp_  ", fcs_ocl_compute_kernel_source_compute_function, "\n",
-    fcs_ocl_compute_kernel_source
-  };
-  const cl_uint nsources = sizeof(sources) / sizeof(sources[0]);
-
-  if (nfp_source && nfp_function)
-  {
-    sources[1] = nfp_source;
-    sources[3] = nfp_function;
-  }
-
-  ocl->program = clCreateProgramWithSource(ocl->context, nsources, sources, NULL, &ret);  // FIXME: CL_CHECK_ERR?
-  ret = clBuildProgram(ocl->program, 1, &ocl->device_id, NULL, NULL, NULL);
-  if (ret != CL_SUCCESS)
-  {
-    size_t length;
-    char buffer[2048];
-    clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
-    printf("clGetProgramBuildInfo: %.*s\n", (int) length, buffer);
-  }
-  ocl->kernel_real = clCreateKernel(ocl->program, "compute_box_real", &ret);
-
   CL_CHECK(clSetKernelArg(ocl->kernel_real, 0, sizeof(cutoff), &cutoff));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 1, sizeof(ocl->mem_positions), &ocl->mem_positions));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 2, sizeof(ocl->mem_charges), &ocl->mem_charges));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 3, sizeof(ocl->mem_field), &ocl->mem_field));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 4, sizeof(ocl->mem_potentials), &ocl->mem_potentials));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 5, sizeof(ocl->mem_boxes), &ocl->mem_boxes));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 6, sizeof(ocl->mem_linkedboxes), &ocl->mem_linkedboxes));
-  CL_CHECK(clSetKernelArg(ocl->kernel_real, 7, sizeof(ocl->mem_linkedbackboxes), &ocl->mem_linkedbackboxes));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 1, sizeof(ocl->mem_param), &ocl->mem_param));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 2, sizeof(ocl->mem_positions), &ocl->mem_positions));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 3, sizeof(ocl->mem_charges), &ocl->mem_charges));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 4, sizeof(ocl->mem_field), &ocl->mem_field));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 5, sizeof(ocl->mem_potentials), &ocl->mem_potentials));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 6, sizeof(ocl->mem_boxes), &ocl->mem_boxes));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 7, sizeof(ocl->mem_linkedboxes), &ocl->mem_linkedboxes));
+  CL_CHECK(clSetKernelArg(ocl->kernel_real, 8, sizeof(ocl->mem_linkedbackboxes), &ocl->mem_linkedbackboxes));
 
   size_t global_work_size[1] = { nboxes };
 
@@ -1034,18 +1061,17 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
 
   if (nghosts > 0)
   {
-    ocl->kernel_ghosts = clCreateKernel(ocl->program, "compute_box_ghosts", &ret);
-
     CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 0, sizeof(cutoff), &cutoff));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 1, sizeof(ocl->mem_positions), &ocl->mem_positions));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 2, sizeof(ocl->mem_field), &ocl->mem_field));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 3, sizeof(ocl->mem_potentials), &ocl->mem_potentials));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 4, sizeof(ocl->mem_boxes), &ocl->mem_boxes));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 5, sizeof(ocl->mem_gpositions), &ocl->mem_gpositions));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 6, sizeof(ocl->mem_gcharges), &ocl->mem_gcharges));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 7, sizeof(ocl->mem_gboxes), &ocl->mem_gboxes));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 8, sizeof(ocl->mem_glinklist), &ocl->mem_glinklist));
-    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 9, sizeof(ocl->mem_glinkedboxes), &ocl->mem_glinkedboxes));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 1, sizeof(ocl->mem_param), &ocl->mem_param));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 2, sizeof(ocl->mem_positions), &ocl->mem_positions));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 3, sizeof(ocl->mem_field), &ocl->mem_field));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 4, sizeof(ocl->mem_potentials), &ocl->mem_potentials));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 5, sizeof(ocl->mem_boxes), &ocl->mem_boxes));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 6, sizeof(ocl->mem_gpositions), &ocl->mem_gpositions));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 7, sizeof(ocl->mem_gcharges), &ocl->mem_gcharges));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 8, sizeof(ocl->mem_gboxes), &ocl->mem_gboxes));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 9, sizeof(ocl->mem_glinklist), &ocl->mem_glinklist));
+    CL_CHECK(clSetKernelArg(ocl->kernel_ghosts, 10, sizeof(ocl->mem_glinkedboxes), &ocl->mem_glinkedboxes));
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->kernel_ghosts, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completions[1]));
     ocl->nkernel_completions = 2;
@@ -1069,6 +1095,8 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
   CL_CHECK(clFinish(ocl->command_queue));
 #endif
 
+  if (ocl->mem_param) CL_CHECK(clReleaseMemObject(ocl->mem_param));
+
   CL_CHECK(clReleaseMemObject(ocl->mem_positions));
   CL_CHECK(clReleaseMemObject(ocl->mem_charges));
   CL_CHECK(clReleaseMemObject(ocl->mem_field));
@@ -1085,9 +1113,6 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
     CL_CHECK(clReleaseMemObject(ocl->mem_glinklist));
     CL_CHECK(clReleaseMemObject(ocl->mem_glinkedboxes));
   }
-
-  CL_CHECK(clReleaseKernel(ocl->kernel_real));
-  CL_CHECK(clReleaseProgram(ocl->program));
 
   return 0;
 }
@@ -1235,7 +1260,7 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
     return -2;
 
 #if FCS_ENABLE_OPENCL
-  fcs_ocl_init(&near->context->ocl);
+  fcs_ocl_init(&near->context->ocl, near->compute_field_potential_source, near->compute_field_potential_function);
 #endif /* FCS_ENABLE_OPENCL */
 
   INFO_CMD(
@@ -1422,7 +1447,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     free(ghostindexlist);
   }
 
-  fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->compute_field_potential_source, near->compute_field_potential_function,
+  fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
     near->nparticles, near->positions, near->charges, near->potentials, near->field,
     near->context->ocl.nboxes, near->context->ocl.boxlist, near->context->ocl.linkedboxes, near->context->ocl.linkedboxesback,
     near->nghosts, near->ghost_positions, near->ghost_charges,

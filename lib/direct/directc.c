@@ -506,7 +506,7 @@ static void directc_coulomb_field_potential(const void *param, fcs_float dist, f
 static FCS_NEAR_LOOP_FP(directc_coulomb_loop_fp, directc_coulomb_field_potential)
 
 const char *directc_coulomb_field_potential_source =
-  "static void directc_coulomb_field_potential(const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
+  "static void directc_coulomb_field_potential(__global const void *param, fcs_float dist, fcs_float *f, fcs_float *p)\n"
   "{\n"
 #if POTENTIAL_CONST1
   "  *p = 1.0;\n"
