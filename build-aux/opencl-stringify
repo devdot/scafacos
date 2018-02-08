@@ -1,0 +1,42 @@
+#!/bin/sh
+#set -xv
+
+FILES=$*
+
+CAT=${CAT:-cat}
+CPP=${CPP:-cpp}
+SED=${SED:-sed}
+HEXDUMP=${HEXDUMP:-hexdump}
+
+FILTER_TO=${FILTER_TO:-.*}
+FILTER_FROM=${FILTER_FROM:-THIS_SHOULD_NOT_BE_CONTAINED_IN_THE_FILE}
+HEX=${HEX:-yes}
+HEXPAD=${HEXPAD:-16}
+HEXNULL=${HEXNULL:-yes}
+INTRO=${INTRO:-}
+OUTRO=${OUTRO:-}
+
+[ -n "${INTRO}" ] && echo "${INTRO}"
+
+for f in ${FILES} ; do
+
+#  ${CAT} ${f} | \
+  ${CPP} ${CPPFLAGS} ${f} | \
+  ${SED} -e "1,/${FILTER_TO}/d" | \
+  ${SED} -e "/${FILTER_FROM}/,\$d" | \
+  ( if [ "${HEX}" = "yes" ] ; then
+    ${HEXDUMP} -v -e "${HEXPAD}/1 \"0x%02x, \" \"\\n\"" | \
+    ( if [ -n "${HEXPAD}" ] ; then ${SED} -e "s/0x  ,/0x00,/g" ; else ${CAT} ; fi ) | \
+    ( if [ "${HEXNULL}" = "yes" ] ; then ${SED} -e "\$s/\$/ 0x00/" ; else ${CAT} ; fi )
+  else
+    while read l ; do
+      echo "\"${l}\\n\""
+    done
+  fi ) | \
+  ${CAT}
+
+done
+
+[ -n "${OUTRO}" ] && echo "${OUTRO}"
+
+exit 0

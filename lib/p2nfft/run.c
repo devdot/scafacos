@@ -79,8 +79,9 @@ static fcs_int box_not_large_enough(
   return 0;
 }
 
-
-#include "nearfield_ocl_source.h"
+const char ifcs_p2nfft_near_compute_source[] = {
+#include "nearfield.cl_str.h"
+};
 
 FCSResult ifcs_p2nfft_run(
     void *rd, fcs_int local_num_particles, fcs_int max_local_num_particles,
