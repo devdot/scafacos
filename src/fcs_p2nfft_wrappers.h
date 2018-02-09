@@ -137,4 +137,3 @@ FCS_P2NFFT_INTERFACE_WRAPPER_1(set_pfft_patience_by_name, set_pfft_patience_by_n
 /* Getters and Setters for PFFT flags */
 FCS_P2NFFT_SET_GET_WRAPPER_1(pfft_preserve_input, pfft_preserve_input, fcs_int, yes_or_no)
 FCS_P2NFFT_SET_GET_WRAPPER_1(pfft_tune,           pfft_tune,           fcs_int, yes_or_no)
-

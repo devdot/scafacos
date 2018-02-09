@@ -26,6 +26,7 @@
 #include <config.h>
 #endif
 
+#include "fcs_common.h"
 #include "fcs_p2nfft.h"
 #include "../lib/p2nfft/p2nfft.h"
 
@@ -322,6 +323,15 @@ FCSResult fcs_p2nfft_set_parameter(FCS handle, fcs_bool continue_on_errors, char
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("pfft_patience_name",      p2nfft_set_pfft_patience_by_name,     FCS_PARSE_VAL(fcs_p_char_t));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("pfft_tune",               p2nfft_set_pfft_tune,                 FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("pfft_preserve_input",     p2nfft_set_pfft_preserve_input,       FCS_PARSE_VAL(fcs_int));
+
+  /* near specific parameters*/
+  if (strncmp(*current, "p2nfft_near_", strlen("p2nfft_near_")) == 0)
+  {
+    *current += strlen("p2nfft_");
+    fcs_near_param_t *near_param;
+    ifcs_p2nfft_get_near_param(handle->method_context, "fcs_p2nfft_set_parameter", &near_param);
+    return fcs_near_set_parameter(near_param, continue_on_errors, current, next, matched);
+  }
 
   return FCS_RESULT_SUCCESS;
 

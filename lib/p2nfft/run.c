@@ -30,7 +30,7 @@
 #include "utils.h"
 #include "nearfield.h"
 #include "interpolation.h"
-#include <common/near/near.h>
+#include "common/near/near.h"
 //#include "constants.h"
 
 #define FCS_P2NFFT_DISABLE_PNFFT_INFO 1
@@ -198,7 +198,9 @@ FCSResult ifcs_p2nfft_run(
 
   if(d->short_range_flag){
     fcs_near_create(&near);
-  
+
+    fcs_near_set_param(&near, &d->near_param);
+
     void *compute_param = NULL;
 
     if(d->interpolation_order >= 0){

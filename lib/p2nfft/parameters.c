@@ -18,8 +18,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "parameters.h"
 #include "types.h"
+#include "common/near/near.h"
+#include "parameters.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -1120,3 +1121,12 @@ IFCS_P2NFFT_SET_GET_FLAG(pfft_,  tune,             PFFT_TUNE)
 IFCS_P2NFFT_SET_GET_FLAG(pfft_,  preserve_input,   PFFT_PRESERVE_INPUT)
 
 
+FCSResult ifcs_p2nfft_get_near_param(void *rd, const char* fnc_name, fcs_near_param_t **near_param)
+{
+  ifcs_p2nfft_data_struct *d = (ifcs_p2nfft_data_struct*)rd;
+  if( rd==NULL )
+    return fcs_result_create(FCS_ERROR_WRONG_ARGUMENT, fnc_name, "Got NULL Pointer.");
+
+  *near_param = &d->near_param;
+  return NULL;
+}

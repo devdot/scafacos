@@ -23,6 +23,7 @@
 #include "init.h"
 #include "types.h"
 #include "utils.h"
+#include "common/near/near.h"
 
 /* P2NFFT naturally needs a two-dimensional procmesh.
  * If we use a three-dimensional procmesh, PNFFT performs an expensive 3d to 2d remap.
@@ -180,6 +181,8 @@ FCSResult ifcs_p2nfft_init(
   d->gridsort_resort = FCS_GRIDSORT_RESORT_NULL;
   d->gridsort_cache = FCS_GRIDSORT_CACHE_NULL;
 
+  fcs_near_param_create(&d->near_param);
+
   *rd = d;
 
   return NULL;
@@ -262,6 +265,9 @@ void ifcs_p2nfft_destroy(
   /* free gridsort data */
   fcs_gridsort_release_cache(&d->gridsort_cache);
   fcs_gridsort_resort_destroy(&d->gridsort_resort);
+
+  /* free near parameter */
+  fcs_near_param_destroy(&d->near_param);
 
   /* free Cartesian communicators */
   MPI_Comm_free(&d->cart_comm_pnfft);

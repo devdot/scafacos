@@ -56,4 +56,10 @@
 /* call macros that create the wrapper prototypes */
 #include "fcs_p2nfft_wrappers.h"
 
+/************************************************************
+ *     Setter and Getter functions for near parameters
+ ************************************************************/
+
+FCSResult ifcs_p2nfft_get_near_param(void *rd, const char* fnc_name, fcs_near_param_t **near_param);
+
 #endif

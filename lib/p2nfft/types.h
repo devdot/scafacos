@@ -30,6 +30,7 @@
 
 #include "common/gridsort/gridsort.h"
 #include "common/gridsort/gridsort_resort.h"
+#include "common/near/near.h"
 
 
 #define FCS_P2NFFT_DEBUG 0
@@ -268,6 +269,9 @@ typedef struct {
 
   /* gridsort cache */
   fcs_gridsort_cache_t gridsort_cache;
+
+  /* near parameters */
+  fcs_near_param_t near_param;
 
 } ifcs_p2nfft_data_struct;
 
