@@ -291,6 +291,7 @@ FCSResult fcs_p2nfft_set_parameter(FCS handle, fcs_bool continue_on_errors, char
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_require_virial",   p2nfft_require_virial,                FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_intpol_order",     p2nfft_set_interpolation_order,       FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_k_cut",            p2nfft_set_k_cut,                     FCS_PARSE_VAL(fcs_float));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_async_near",       p2nfft_set_async_near,                  FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_ignore_tolerance", p2nfft_set_ignore_tolerance,          FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_ignore_field",     p2nfft_set_ignore_field,              FCS_PARSE_VAL(fcs_int));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("p2nfft_verbose_tuning",   p2nfft_set_verbose_tuning,            FCS_PARSE_VAL(fcs_int));

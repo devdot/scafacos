@@ -65,6 +65,9 @@ FCS_P2NFFT_INTERFACE_WRAPPER_1(set_reg_far_by_name, set_reg_far_by_name, char*, 
 FCS_P2NFFT_SET_GET_WRAPPER_1(reg_kernel, reg_kernel, fcs_int, reg_kern)
 FCS_P2NFFT_INTERFACE_WRAPPER_1(set_reg_kernel_by_name, set_reg_kernel_by_name, char*, reg_kern_name)
 
+/* Getter and Setter for asynchronous near-field computation */
+FCS_P2NFFT_SET_GET_WRAPPER_1(async_near, async_near, fcs_int, async_near)
+
 /* Getters and Setters for polynomial degree of near field regularization */
 FCS_P2NFFT_SET_GET_TUNE_WRAPPER_1(p, p, fcs_int, p)
 

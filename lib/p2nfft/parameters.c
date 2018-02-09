@@ -731,6 +731,31 @@ IFCS_P2NFFT_SET_GET_FLAG(, ignore_potential,  FCS_P2NFFT_IGNORE_POTENTIAL)
 IFCS_P2NFFT_SET_GET_FLAG(, ignore_field,      FCS_P2NFFT_IGNORE_FIELD)
 IFCS_P2NFFT_SET_GET_FLAG(, verbose_tuning,    FCS_P2NFFT_VERBOSE_TUNING)
 
+/* Getters and Setters for far field cutoff radius */
+FCSResult ifcs_p2nfft_set_async_near(
+    void *rd, const char* fnc_name, fcs_int async_near
+    )
+{
+  ifcs_p2nfft_data_struct *d = (ifcs_p2nfft_data_struct*)rd;
+  if( rd==NULL )
+    return fcs_result_create(FCS_ERROR_WRONG_ARGUMENT, fnc_name, "Got NULL Pointer.");
+
+  d->async_near = async_near;
+  return NULL;
+}
+
+FCSResult ifcs_p2nfft_get_async_near(
+    void *rd, const char* fnc_name, fcs_int *async_near
+    )
+{
+  ifcs_p2nfft_data_struct *d = (ifcs_p2nfft_data_struct*)rd;
+  if( rd==NULL )
+    return fcs_result_create(FCS_ERROR_WRONG_ARGUMENT, fnc_name, "Got NULL Pointer.");
+
+  *async_near = d->async_near;
+  return NULL;
+}
+
 
 /****************************************************
  *  Setters and getter for PNFFT specific parameters 
