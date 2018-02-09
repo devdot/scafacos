@@ -27,6 +27,7 @@
 
 #include <mpi.h>
 
+#include "common/near/near.h"
 #include "fcs_common.h"
 
 
@@ -52,6 +53,42 @@ next_param:
 
 
 FCSResult fcs_common_print_parameters(FCS handle)
+{
+  return FCS_RESULT_SUCCESS;
+}
+
+
+FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched)
+{
+  char *param = *current;
+  char *cur = *next;
+
+  *matched = 0;
+
+  FCS_PARSE_DUMMY();
+
+#define handle  near_param
+
+#if FCS_NEAR_OCL
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl",      near_param_set_ocl,      FCS_PARSE_VAL(fcs_int));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_conf", near_param_set_ocl_conf, FCS_PARSE_VAL(fcs_p_char_t));
+#endif /* FCS_NEAR_OCL */
+
+#undef handle
+
+  return FCS_RESULT_SUCCESS;
+
+next_param:
+  *current = param;
+  *next = cur;
+
+  *matched = 1;
+
+  return FCS_RESULT_SUCCESS;
+}
+
+
+FCSResult fcs_near_print_parameters(fcs_near_param_t *near_param)
 {
   return FCS_RESULT_SUCCESS;
 }

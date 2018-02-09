@@ -36,6 +36,9 @@ extern "C" {
 FCSResult fcs_common_set_parameter(FCS handle, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched);
 FCSResult fcs_common_print_parameters(FCS handle);
 
+FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched);
+FCSResult fcs_near_print_parameters(fcs_near_param_t *near_param);
+
 
 #ifdef __cplusplus
 }
