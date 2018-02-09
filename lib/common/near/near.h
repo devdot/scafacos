@@ -32,6 +32,10 @@ extern "C" {
 
 #include "common/gridsort/gridsort.h"
 
+#define FCS_NEAR_OCL        1
+#define FCS_NEAR_OCL_CPU    1
+#define FCS_NEAR_OCL_ASYNC  1
+
 typedef fcs_float (*fcs_near_field_f)(const void *param, fcs_float dist);
 typedef fcs_float (*fcs_near_potential_f)(const void *param, fcs_float dist);
 typedef void (*fcs_near_field_potential_f)(const void *param, fcs_float dist, fcs_float *f, fcs_float *p);
@@ -49,6 +53,24 @@ typedef fcs_gridsort_resort_t fcs_near_resort_t;
 #define FCS_NEAR_RESORT_NULL  FCS_GRIDSORT_RESORT_NULL
 
 
+/**
+ * @brief near field solver parameter structure
+ */
+typedef struct _fcs_near_param_t
+{
+#if FCS_NEAR_OCL
+  fcs_int ocl;
+
+#define FCS_NEAR_PARAM_OCL_CONF_SIZE  256
+  char ocl_conf[FCS_NEAR_PARAM_OCL_CONF_SIZE];
+#endif /* FCS_NEAR_OCL */
+
+} fcs_near_param_t;
+
+
+/**
+ * @brief near field solver computation context
+ */
 struct _fcs_near_compute_context_t;
 
 
@@ -87,9 +109,20 @@ typedef struct _fcs_near_t
   fcs_int resort;
   fcs_gridsort_resort_t gridsort_resort;
 
+  fcs_near_param_t near_param;
+
   struct _fcs_near_compute_context_t *context;
 
 } fcs_near_t;
+
+
+void fcs_near_param_create(fcs_near_param_t *near_param);
+void fcs_near_param_destroy(fcs_near_param_t *near_param);
+void fcs_near_param_set_param(fcs_near_param_t *near_param, fcs_near_param_t *param);
+#if FCS_NEAR_OCL
+void *fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
+void *fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
+#endif /* FCS_NEAR_OCL */
 
 
 /**
@@ -103,6 +136,8 @@ void fcs_near_create(fcs_near_t *near);
  * @param near fcs_near_t* near field solver object
  */
 void fcs_near_destroy(fcs_near_t *near);
+
+void fcs_near_set_param(fcs_near_t *near, fcs_near_param_t *near_param);
 
 /**
  * @brief set callback function for field computations
