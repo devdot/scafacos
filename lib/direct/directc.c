@@ -114,6 +114,8 @@ void fcs_directc_create(fcs_directc_t *directc)
   directc->cutoff = 0.0;
   directc->cutoff_with_near = 0;
 
+  fcs_near_param_create(&directc->near_param);
+
   directc->max_particle_move = -1;
 
   directc->resort = 0;
@@ -123,6 +125,8 @@ void fcs_directc_create(fcs_directc_t *directc)
 
 void fcs_directc_destroy(fcs_directc_t *directc)
 {
+  fcs_near_param_destroy(&directc->near_param);
+
   fcs_near_resort_destroy(&directc->near_resort);
 }
 
@@ -581,6 +585,8 @@ void fcs_directc_run(fcs_directc_t *directc, MPI_Comm comm)
   if (directc->cutoff_with_near)
   {
     fcs_near_create(&near);
+
+    fcs_near_set_param(&near, &directc->near_param);
 
     fcs_near_set_loop(&near, directc_coulomb_loop_fp);
     fcs_near_set_field_potential_source(&near, directc_coulomb_field_potential_source, directc_coulomb_field_potential_function);

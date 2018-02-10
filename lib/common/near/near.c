@@ -1937,6 +1937,8 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
 
   fcs_near_create(&near_s);
 
+  fcs_near_set_param(&near_s, &near->near_param);
+
   fcs_near_set_field(&near_s, near->compute_field);
   fcs_near_set_potential(&near_s, near->compute_potential);
   fcs_near_set_field_potential(&near_s, near->compute_field_potential);

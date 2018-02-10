@@ -49,6 +49,8 @@ typedef struct _fcs_directc_t
   fcs_float cutoff;
   fcs_int cutoff_with_near;
 
+  fcs_near_param_t near_param;
+
   fcs_float max_particle_move;
 
   fcs_int resort;

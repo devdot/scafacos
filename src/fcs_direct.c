@@ -31,6 +31,7 @@
 #include <mpi.h>
 
 #include "direct/directc.h"
+#include "fcs_common.h"
 #include "fcs_direct.h"
 
 
@@ -212,6 +213,13 @@ FCSResult fcs_direct_set_parameter(FCS handle, fcs_bool continue_on_errors, char
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("direct_cutoff_with_near",             direct_set_cutoff_with_near,             FCS_PARSE_VAL(fcs_bool));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("direct_metallic_boundary_conditions", direct_set_metallic_boundary_conditions, FCS_PARSE_VAL(fcs_bool));
   FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("direct_periodic_images",              direct_set_periodic_images,              FCS_PARSE_SEQ(fcs_int, 3));
+
+  /* near specific parameters*/
+  if (strncmp(*current, "direct_near_", strlen("direct_near_")) == 0)
+  {
+    *current += strlen("direct_");
+    return fcs_near_set_parameter(&handle->direct_param->directc.near_param, continue_on_errors, current, next, matched);
+  }
 
   return FCS_RESULT_SUCCESS;
 

@@ -121,6 +121,12 @@ void fcs_near_param_destroy(fcs_near_param_t *near_param);
 void fcs_near_param_set_param(fcs_near_param_t *near_param, fcs_near_param_t *param);
 #if FCS_NEAR_OCL
 void *fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
+/*
+  ocl_conf = <compute_units>;<compute_units>;...
+  <compute_units> = <platform>:<device>:<device>:...
+  <platform> = <platform_index>|<platform_suffix>
+  <device> = <device_index>|default|cpu|gpu|accel|custom|all
+*/
 void *fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
 #endif /* FCS_NEAR_OCL */
 
