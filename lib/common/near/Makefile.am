@@ -213,3 +213,11 @@ libfcs_near_mpiwrap_la_SOURCES = \
   near.h \
   z_tools.h \
   $(sl_extra_include_SOURCE)
+
+nodist_libfcs_near_mpiwrap_la_SOURCES = near.cl_str.h
+BUILT_SOURCES = near.cl_str.h
+CLEANFILES = near.cl_str.h
+
+near.cl_str.h: $(srcdir)/near.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
+	CPP="$(CPP)" CPPFLAGS="$(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libfcs_p2nfft_la_CPPFLAGS) $(CPPFLAGS)" USE_CPP="no" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="no" HEXPAD="16" HEXNULL="yes" \
+	$(SHELL) $(top_srcdir)/build-aux/opencl-stringify $< > $@
