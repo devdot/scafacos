@@ -33,8 +33,6 @@ extern "C" {
 #include "common/gridsort/gridsort.h"
 
 #define FCS_NEAR_OCL        1
-#define FCS_NEAR_OCL_CPU    1
-#define FCS_NEAR_OCL_ASYNC  1
 
 typedef fcs_float (*fcs_near_field_f)(const void *param, fcs_float dist);
 typedef fcs_float (*fcs_near_potential_f)(const void *param, fcs_float dist);
@@ -122,10 +120,10 @@ void fcs_near_param_set_param(fcs_near_param_t *near_param, fcs_near_param_t *pa
 #if FCS_NEAR_OCL
 void *fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
 /*
-  ocl_conf = <compute_units>;<compute_units>;...
+  ocl_conf = <compute_units>/<compute_units>/...
   <compute_units> = <platform>:<device>:<device>:...
   <platform> = <platform_index>|<platform_suffix>
-  <device> = <device_index>|default|cpu|gpu|accel|custom|all
+  <device> = default|cpu|gpu|accel|custom|all[<device_index>]
 */
 void *fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
 #endif /* FCS_NEAR_OCL */

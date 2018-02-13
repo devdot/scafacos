@@ -33,7 +33,6 @@ ifcs_p2nfft_compute_near_field_periodic_erfc(
   return -(erfc_part_ri + 2.0*alpha*FCS_P2NFFT_1_SQRTPI*exp(-adist*adist)) * inv_dist;
 }
 
-
 static inline void
 ifcs_p2nfft_compute_near_periodic_erfc(
     __global const void *param, fcs_float dist,

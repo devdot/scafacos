@@ -24,7 +24,8 @@
 # include <config.h>
 #endif
 
-#define FCS_NEAR_ASYNC  1
+#define FCS_NEAR_ASYNC      1
+#define FCS_NEAR_OCL_ASYNC  1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -927,13 +928,98 @@ static const char *fcs_ocl_compute_kernel_source =
 
 typedef struct
 {
+#define FCS_OCL_UNIT_STR_SIZE  32
+
+  fcs_int platform_index;
+  char platform_suffix[FCS_OCL_UNIT_STR_SIZE];
+
+  char device_type[FCS_OCL_UNIT_STR_SIZE];
+  fcs_int device_index;
+
+} fcs_ocl_unit_t;
+
+
+static fcs_int fcs_ocl_parse_conf(const char *ocl_conf, fcs_int *nunits, fcs_ocl_unit_t *units)
+{
+  char conf[FCS_NEAR_PARAM_OCL_CONF_SIZE];
+  strncpy(conf, ocl_conf, FCS_NEAR_PARAM_OCL_CONF_SIZE);
+
+  const fcs_int max_nunits = *nunits;
+
+  char *next_unit = conf;
+  *nunits = 0;
+  while (next_unit && *nunits < max_nunits)
+  {
+    const char *current_unit = next_unit;
+    next_unit = strchr(current_unit, '/');
+    if (next_unit) { *next_unit = '\0'; ++next_unit; }
+    DEBUG_CMD(printf("ocl current unit: '%s'\n", current_unit););
+
+    char *n = strchr(current_unit, ':');
+    if (n) { *n = '\0'; ++n; }
+    DEBUG_CMD(printf("  platform: '%s'\n", current_unit););
+
+    units[*nunits].platform_suffix[0] = '\0';
+    units[*nunits].platform_index = -1;
+    if (current_unit[0] != '\0')
+    {
+      fcs_int idx;
+      if (sscanf(current_unit, "%" FCS_LMOD_INT "d", &idx) == 1) units[*nunits].platform_index = idx;
+      else strncpy(units[*nunits].platform_suffix, current_unit, FCS_OCL_UNIT_STR_SIZE);
+    }
+
+    fcs_int current_platform = *nunits;
+
+    if (!n)
+    {
+      DEBUG_CMD(printf("  device: ''\n"););
+
+      units[*nunits].device_type[0] = '\0';
+      units[*nunits].device_index = 0;
+
+      ++(*nunits);
+    }
+
+    while (n && *nunits < max_nunits)
+    {
+      const char *c = n;
+      n = strchr(c, ':');
+      if (n) { *n = '\0'; ++n; }
+
+      DEBUG_CMD(printf("  device: '%s'\n", c););
+
+      if (current_platform != *nunits)
+      {
+        units[*nunits].platform_index = units[current_platform].platform_index;
+        strcpy(units[*nunits].platform_suffix, units[current_platform].platform_suffix);
+      }
+
+      char *idx = strchr(c, '[');
+      if (idx) { *idx = '\0'; ++idx; }
+
+      strcpy(units[*nunits].device_type, c);
+      units[*nunits].device_index = (idx)?atoi(idx):0;
+
+      ++(*nunits);
+    }
+  }
+
+  return 0;
+}
+
+
+typedef struct
+{
+#ifdef DO_INFO
+  fcs_int info;
+#endif
+
   fcs_int nboxes;
   fcs_int *boxlist, *linkedboxes, *linkedboxesback;
 
   fcs_int nghostboxes;
   fcs_int *ghostboxlist, *ghostlinked, *ghostlinkedboxes;
 
-  cl_device_id device_id;
   cl_context context;
   cl_command_queue command_queue;
 
@@ -954,40 +1040,83 @@ typedef struct
 } fcs_ocl_context_t;
 
 
-static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, const char *nfp_source, const char *nfp_function)
+static cl_device_type device_str2type(const char *device)
 {
-  /*  Initialiseriung  */
-  cl_int ret;
-  cl_uint ret_num_platforms;
-  cl_uint ret_num_devices;
+  cl_device_type type = CL_DEVICE_TYPE_ALL;
 
-  /*  Platform und Device Informationen abrufen  */
-  ret = clGetPlatformIDs(0, NULL, &ret_num_platforms);
-  cl_platform_id *platform_ids = malloc(ret_num_platforms * sizeof(cl_platform_id));
-  ret = clGetPlatformIDs(ret_num_platforms, platform_ids, NULL);
+  if (strcmp(device, "default") == 0) type = CL_DEVICE_TYPE_DEFAULT;
+  else if (strcmp(device, "cpu") == 0) type = CL_DEVICE_TYPE_CPU;
+  else if (strcmp(device, "gpu") == 0) type = CL_DEVICE_TYPE_GPU;
+  else if (strcmp(device, "accel") == 0) type = CL_DEVICE_TYPE_ACCELERATOR;
+  else if (strcmp(device, "all") == 0) type = CL_DEVICE_TYPE_ALL;
+
+  return type;
+}
+
+
+static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl_unit_t *units, const char *nfp_source, const char *nfp_function)
+{
+  cl_int ret;
+
+  cl_device_id device_id;
+
+#define MAX_NPLATFORMS  8
+  cl_platform_id platform_ids[MAX_NPLATFORMS];
+  cl_uint nplatforms = 0;
+  ret = clGetPlatformIDs(MAX_NPLATFORMS, platform_ids, &nplatforms);
+#undef MAX_NPLATFORMS
+
+  cl_device_type type = device_str2type(units[0].device_type);
 
   ret = CL_DEVICE_NOT_FOUND;
-  int d = 0;
-  do {
-    ret = clGetDeviceIDs(platform_ids[d],
-#if FCS_NEAR_OCL_CPU
-      CL_DEVICE_TYPE_CPU,
-#else
-      CL_DEVICE_TYPE_GPU,
-#endif
-      1, &ocl->device_id, &ret_num_devices);
-    ++d;
+  cl_uint p = z_max(0, units[0].platform_index);
+  while (ret != CL_SUCCESS && p < nplatforms)
+  {
+    if (p == units[0].platform_index || units[0].platform_index < 0)
+    {
+#define MAX_NDEVICES  8
+      cl_device_id device_ids[MAX_NDEVICES];
+      cl_uint ndevices = 0;
+      ret = clGetDeviceIDs(platform_ids[p], type, MAX_NDEVICES, device_ids, &ndevices);
+#undef MAX_NDEVICES
 
-  } while (ret != CL_SUCCESS && d < ret_num_platforms);
+      fcs_int d = z_max(0, units[0].device_index);
 
-  free(platform_ids);
+      if (ret == CL_SUCCESS && d < ndevices)
+      {
+        device_id = device_ids[d];
+
+#define MAX_NAME_SIZE  256
+        INFO_CMD(
+          if (ocl->info)
+          {
+            char platform_name[MAX_NAME_SIZE];
+            char device_name[MAX_NAME_SIZE];
+            clGetPlatformInfo(platform_ids[p], CL_PLATFORM_NAME, MAX_NAME_SIZE, platform_name, NULL);
+            clGetDeviceInfo(device_id, CL_DEVICE_NAME, MAX_NAME_SIZE, device_name, NULL);
+
+            printf(INFO_PRINT_PREFIX "  ocl platform: '%s'\n", platform_name);
+            printf(INFO_PRINT_PREFIX "  ocl device: '%s'\n", device_name);
+          }
+        );
+#undef MAX_NAME_SIZE
+
+      } else
+      {
+        ret = CL_DEVICE_NOT_FOUND;
+        if (p == units[0].platform_index) p = nplatforms;
+      }
+    }
+
+    ++p;
+  }
 
   if (ret != CL_SUCCESS) return 1;
 
-  ocl->context = clCreateContext(NULL, 1, &ocl->device_id, NULL, NULL, &ret);
+  ocl->context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
   if (ret != CL_SUCCESS) return 1;
 
-  ocl->command_queue = clCreateCommandQueue(ocl->context, ocl->device_id, 0, &ret);
+  ocl->command_queue = clCreateCommandQueue(ocl->context, device_id, 0, &ret);
   if (ret != CL_SUCCESS) return 1;
 
   const char *sources[] = {
@@ -1007,12 +1136,12 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, const char *nfp_source, cons
   ocl->program = clCreateProgramWithSource(ocl->context, nsources, sources, NULL, &ret);
   if (ret != CL_SUCCESS) return 1;  // FIXME: CL_CHECK_ERR?
 
-  ret = clBuildProgram(ocl->program, 1, &ocl->device_id, NULL, NULL, NULL);
+  ret = clBuildProgram(ocl->program, 1, &device_id, NULL, NULL, NULL);
   if (ret != CL_SUCCESS)
   {
     size_t length;
     char buffer[32*1024];
-    clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    clGetProgramBuildInfo(ocl->program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
     printf("clGetProgramBuildInfo: %.*s\n", (int) length, buffer);
     return 1;
   }
@@ -1308,13 +1437,6 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
   if ((near->compute_field_potential && near->compute_field_potential_3diff) || ((near->compute_field || near->compute_potential) && (near->compute_field_3diff || near->compute_potential_3diff)))
     return -2;
 
-#if FCS_NEAR_OCL
-  if (near->near_param.ocl)
-  {
-    fcs_ocl_init(&near->context->ocl, near->compute_field_potential_source, near->compute_field_potential_function);
-  }
-#endif /* FCS_NEAR_OCL */
-
   INFO_CMD(
     if (near->context->comm_rank == 0)
     {
@@ -1332,6 +1454,36 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 #endif /* FCS_NEAR_OCL */
     }
   );
+
+#if FCS_NEAR_OCL
+  if (near->near_param.ocl)
+  {
+#define MAX_UNITS  4
+    fcs_int nunits = MAX_UNITS;
+    fcs_ocl_unit_t units[MAX_UNITS];
+
+    fcs_ocl_parse_conf(near->near_param.ocl_conf, &nunits, units);
+
+    INFO_CMD(
+      if (near->context->comm_rank == 0)
+      {
+        printf(INFO_PRINT_PREFIX "  ocl units: %" FCS_LMOD_INT "d\n", nunits);
+
+        fcs_int j;
+        for (j = 0; j < nunits; ++j)
+        {
+          printf(INFO_PRINT_PREFIX "    %" FCS_LMOD_INT "d: %" FCS_LMOD_INT "d | '%s' | '%s' | %" FCS_LMOD_INT "d\n", j, units[j].platform_index, units[j].platform_suffix, units[j].device_type, units[j].device_index);
+        }
+      }
+    );
+
+#ifdef DO_INFO
+    near->context->ocl.info = (near->context->comm_rank == 0);
+#endif /* DO_INFO */
+
+    fcs_ocl_init(&near->context->ocl, nunits, units, near->compute_field_potential_source, near->compute_field_potential_function);
+  }
+#endif /* FCS_NEAR_OCL */
 
   near->context->real_boxes = malloc((near->nparticles + 1) * sizeof(box_t)); /* + 1 for a sentinel */
   if (near->nghosts > 0) near->context->ghost_boxes = malloc((near->nghosts + 1) * sizeof(box_t)); /* + 1 for a sentinel */
