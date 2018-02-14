@@ -78,6 +78,7 @@ typedef fcs_int fcs_bool;
  * @brief definitions of return codes
  */
 #define FCS_SUCCESS                    0
+#define FCS_ERROR                      -1
 #define FCS_ERROR_NULL_ARGUMENT        1
 #define FCS_ERROR_ALLOC_FAILED         2
 #define FCS_ERROR_WRONG_ARGUMENT       3

@@ -83,8 +83,10 @@ FCSResult fcs_result_create(fcs_int code, const char *function, const char *mess
 void fcs_result_destroy(FCSResult result)
 {
   if (result == FCS_RESULT_SUCCESS) return;
+  if (result == FCS_RESULT_FAILURE) return;
+  if (result == &fcs_result_create_error) return;
 
-  if (result != &fcs_result_create_error) free(result);
+  free(result);
 }
 
 
@@ -94,6 +96,7 @@ void fcs_result_destroy(FCSResult result)
 fcs_int fcs_result_get_return_code(FCSResult result)
 {
   if (result == FCS_RESULT_SUCCESS) return FCS_SUCCESS;
+  if (result == FCS_RESULT_FAILURE) return FCS_ERROR;
 
   return result->error_code;
 }
@@ -105,6 +108,7 @@ fcs_int fcs_result_get_return_code(FCSResult result)
 const char *fcs_result_get_function(FCSResult result)
 {
   if (result == FCS_RESULT_SUCCESS) return NULL;
+  if (result == FCS_RESULT_FAILURE) return NULL;
 
   return result->function;
 }
@@ -116,6 +120,7 @@ const char *fcs_result_get_function(FCSResult result)
 const char *fcs_result_get_message(FCSResult result)
 {
   if (result == FCS_RESULT_SUCCESS) return NULL;
+  if (result == FCS_RESULT_FAILURE) return NULL;
 
   return result->message;
 }
@@ -130,6 +135,9 @@ void fcs_result_print_result(FCSResult result)
   {
     case FCS_SUCCESS:
       printf("return code: FCS_SUCCESS\n");
+      break;
+    case FCS_ERROR:
+      printf("return code: FCS_ERROR\n");
       break;
     case FCS_ERROR_ALLOC_FAILED:
       printf("return code: FCS_ALLOC_FAILED\n");
@@ -154,13 +162,15 @@ void fcs_result_print_result(FCSResult result)
       break;
   }
 
-  if (result == FCS_RESULT_SUCCESS || fcs_result_get_function(result)[0] == '\0')
+  const char *s = fcs_result_get_function(result);
+  if (!s || s[0] == '\0')
     printf("function: not available\n");
   else
-    printf("function: %s\n", fcs_result_get_function(result));
+    printf("function: %s\n", s);
 
-  if (result == FCS_RESULT_SUCCESS || fcs_result_get_message(result)[0] == '\0')
+  s = fcs_result_get_message(result);
+  if (!s || s[0] == '\0')
     printf("message: not available\n");
   else
-    printf("message: %s\n", fcs_result_get_message(result));
+    printf("message: %s\n", s);
 }

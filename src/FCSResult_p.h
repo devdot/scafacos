@@ -42,6 +42,7 @@ extern "C" {
 typedef struct FCSResult_t *FCSResult;
 
 #define FCS_RESULT_SUCCESS  NULL
+#define FCS_RESULT_FAILURE  (FCSResult)1
 
 #define FCS_RESULT_MAX_FUNCTION_LENGTH   64
 #define FCS_RESULT_MAX_MESSAGE_LENGTH   512
