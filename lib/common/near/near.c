@@ -63,7 +63,6 @@
 
 #if FCS_NEAR_OCL
 
-/*  Include der OpenCL Header  */
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -335,24 +334,32 @@ void fcs_near_param_set_param(fcs_near_param_t *near_param, fcs_near_param_t *pa
 }
 
 
-#if FCS_NEAR_OCL
+#if HAVE_OPENCL
 
-void *fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl)
+fcs_int fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl)
 {
+#if FCS_NEAR_OCL
   near_param->ocl = ocl;
 
-  return NULL;
+  return 0;
+#else /* FCS_NEAR_OCL */
+  return 1;
+#endif /* FCS_NEAR_OCL */
 }
 
 
-void *fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_conf)
+fcs_int fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_conf)
 {
+#if FCS_NEAR_OCL
   strncpy(near_param->ocl_conf, ocl_conf, FCS_NEAR_PARAM_OCL_CONF_SIZE);
 
-  return NULL;
+  return 0;
+#else /* FCS_NEAR_OCL */
+  return 1;
+#endif /* FCS_NEAR_OCL */
 }
 
-#endif /* FCS_NEAR_OCL */
+#endif /* HAVE_OPENCL */
 
 
 void fcs_near_create(fcs_near_t *near)

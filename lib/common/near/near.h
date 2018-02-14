@@ -32,7 +32,11 @@ extern "C" {
 
 #include "common/gridsort/gridsort.h"
 
-#define FCS_NEAR_OCL        1
+#define FCS_NEAR_OCL  1
+
+#if !HAVE_OPENCL
+# undef FCS_NEAR_OCL
+#endif
 
 typedef fcs_float (*fcs_near_field_f)(const void *param, fcs_float dist);
 typedef fcs_float (*fcs_near_potential_f)(const void *param, fcs_float dist);
@@ -117,16 +121,16 @@ typedef struct _fcs_near_t
 void fcs_near_param_create(fcs_near_param_t *near_param);
 void fcs_near_param_destroy(fcs_near_param_t *near_param);
 void fcs_near_param_set_param(fcs_near_param_t *near_param, fcs_near_param_t *param);
-#if FCS_NEAR_OCL
-void *fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
+#if HAVE_OPENCL
+fcs_int fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
 /*
   ocl_conf = <compute_units>/<compute_units>/...
   <compute_units> = <platform>:<device>:<device>:...
   <platform> = <platform_index>|<platform_suffix>
   <device> = default|cpu|gpu|accel|custom|all[<device_index>]
 */
-void *fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
-#endif /* FCS_NEAR_OCL */
+fcs_int fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
+#endif /* HAVE_OPENCL */
 
 
 /**
@@ -192,9 +196,13 @@ void fcs_near_set_field_potential_3diff(fcs_near_t *near, fcs_near_field_potenti
  */
 void fcs_near_set_loop(fcs_near_t *near, fcs_near_loop_f compute_loop);
 
+#if HAVE_OPENCL
+
 void fcs_near_set_field_potential_source(fcs_near_t *near, const char *compute_field_potential_source, const char *compute_field_potential_function);
 
 void fcs_near_set_compute_param_size(fcs_near_t *near, fcs_int compute_param_size);
+
+#endif /* HAVE_OPENCL */
 
 /**
  * @brief set particle system properties

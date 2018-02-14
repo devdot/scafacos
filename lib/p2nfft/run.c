@@ -79,9 +79,13 @@ static fcs_int box_not_large_enough(
   return 0;
 }
 
+#if HAVE_OPENCL
+
 const char ifcs_p2nfft_near_compute_source[] = {
 #include "nearfield.cl_str.h"
 };
+
+#endif /* HAVE_OPENCL */
 
 FCSResult ifcs_p2nfft_run(
     void *rd, fcs_int local_num_particles, fcs_int max_local_num_particles,
@@ -221,12 +225,16 @@ FCSResult ifcs_p2nfft_run(
     } else if(d->reg_kernel == FCS_P2NFFT_REG_KERNEL_EWALD) {
       if(d->interpolation_order == -1) {
         fcs_near_set_loop(&near, ifcs_p2nfft_compute_near_periodic_erfc_loop);
+#if HAVE_OPENCL
         fcs_near_set_field_potential_source(&near, ifcs_p2nfft_near_compute_source, "ifcs_p2nfft_compute_near_periodic_erfc");
         fcs_near_set_compute_param_size(&near, sizeof(fcs_float));
+#endif /* HAVE_OPENCL */
       } else {
         fcs_near_set_loop(&near, ifcs_p2nfft_compute_near_periodic_approx_erfc_loop);
+#if HAVE_OPENCL
         fcs_near_set_field_potential_source(&near, ifcs_p2nfft_near_compute_source, "ifcs_p2nfft_compute_near_periodic_approx_erfc");
         fcs_near_set_compute_param_size(&near, sizeof(fcs_float));
+#endif /* HAVE_OPENCL */
       }
       compute_param = &d->alpha;
     } else {

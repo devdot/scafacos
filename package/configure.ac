@@ -30,9 +30,13 @@ LT_INIT([disable-shared])
 AX_FCS_ENABLE_SINGLE_LIB_ARG
 AX_FCS_ENABLE_SINGLE_LIB
 
+# List of all features.
+m4_define([all_features], [opencl])
+
 # List of all solvers.
 m4_define([all_solver_methods], [direct ewald fmm memd mmm1d mmm2d p2nfft p3m pepc pp3mg vmg wolf])
 
+# List of all common methods.
 m4_define([all_common_methods], [near gridsort resort fcs_common mmm pnfft pfft fftw3_mpi_common fftw3_common fftw3_mpi fftw3])
 
 # Determine enabled solvers.
@@ -56,7 +60,7 @@ function process_package
 
 #  echo "processing: $pkgdir"
 
-  AX_FCS_PACKAGE_PROCESS([${topdir}],[$pkgdir],[fcs ]all_solver_methods all_common_methods)
+  AX_FCS_PACKAGE_PROCESS([${topdir}],[$pkgdir],[fcs ]all_solver_methods all_common_methods all_features)
 
 #  AC_FOREACH([method],[fcs ]all_solver_methods all_common_methods,[
 #    echo "method:"
@@ -103,7 +107,7 @@ if test "x${ax_fcs_package_CXXOMP_USE}" != x ; then
   CXXFLAGS="$CXXFLAGS $OPENMP_CXXFLAGS"
 fi
 
-AC_FOREACH([mod],[fcs ]all_solver_methods all_common_methods,[
+AC_FOREACH([mod],[fcs ]all_solver_methods all_common_methods all_features,[
 if test "x${ax_fcs_package_[]mod[]_USE}" != x ; then
   if test "x$enable_single_lib" != xyes ; then
     SCAFACOS_PC_LIBS="${SCAFACOS_PC_LIBS} ${ax_fcs_package_[]mod[]_LIBS}"

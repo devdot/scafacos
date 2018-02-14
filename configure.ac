@@ -40,6 +40,9 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 # Print an error if a (custom) AX_ or ACX_ macro appears in the ouput
 m4_pattern_forbid([^A[C]?X_])
 
+# List of all .
+m4_define([all_features], [opencl])
+
 # List of all solvers.
 m4_define([all_solver_methods], [direct ewald fmm memd mmm1d mmm2d p2nfft p3m pepc pp3mg vmg wolf])
 
@@ -164,6 +167,18 @@ if test "x$enable_single_lib" = xyes ; then
     *--disable-library-install*) ;;
     *) ac_configure_args="$ac_configure_args --disable-library-install" ;;
   esac
+fi
+
+if test "x$enable_opencl" = xyes ; then
+	use_fcs_opencl=yes
+	opencl_CFLAGS=
+	opencl_CXXFLAGS=
+	opencl_CPPFLAGS=
+	opencl_LDFLAGS=
+	opencl_LIBS=-lOpenCL
+#  AC_DEFINE([FCS_ENABLE_OPENCL], [1], [Whether the OpenCL features are enabled.])
+else
+	use_fcs_opencl=no
 fi
 
 # Decide which solvers we want to build.
@@ -739,6 +754,10 @@ if test "x$use_fcs_mmm" = xyes ; then
  AX_FCS_PACKAGE_ADD([mmm_LIBS],[-lfcs_mmm])
  AX_FCS_PACKAGE_ADD([mmm_LIBS_A],[lib/common/mmm-common/libfcs_mmm.la])
 fi
+if test "x$use_fcs_opencl" = xyes ; then
+ AX_FCS_PACKAGE_ADD([opencl_USE],[yes])
+ AX_FCS_PACKAGE_ADD([opencl_LDADD],[${opencl_LDFLAGS} ${opencl_LIBS}])
+fi
 
 # specific solvers
 if test "x$use_fcs_direct" = xyes ; then
@@ -926,6 +945,10 @@ AC_MSG_NOTICE([])
 #AC_MSG_NOTICE([Requirements:])
 #AC_MSG_NOTICE([-------------])
 #AC_MSG_NOTICE([])
+AC_MSG_NOTICE([Features:])
+AC_MSG_NOTICE([-------------])
+AC_MSG_NOTICE([ OpenCL                     = $use_fcs_opencl])
+AC_MSG_NOTICE([])
 AC_MSG_NOTICE([Package settings:])
 AC_MSG_NOTICE([-----------------])
 AC_MSG_NOTICE([ FCS C types                = $fcs_int / $fcs_float])

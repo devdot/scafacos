@@ -45,6 +45,7 @@ libfcs_p2nfft_la_SOURCES = \
 	cg_cos_coeff_sym.c cg_cos_coeff_sym.h \
 	cg_cos_err_sym.c cg_cos_err_sym.h
 
+if ENABLE_OPENCL
 nodist_libfcs_p2nfft_la_SOURCES = nearfield.cl_str.h
 BUILT_SOURCES = nearfield.cl_str.h
 CLEANFILES = nearfield.cl_str.h
@@ -52,6 +53,7 @@ CLEANFILES = nearfield.cl_str.h
 nearfield.cl_str.h: $(srcdir)/nearfield.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
 	CPP="$(CPP)" CPPFLAGS="$(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libfcs_p2nfft_la_CPPFLAGS) $(CPPFLAGS)" USE_CPP="yes" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="yes" HEXPAD="16" HEXNULL="yes" \
 	$(SHELL) $(top_srcdir)/build-aux/opencl-stringify $< > $@
+endif
 
 #noinst_PROGRAMS = tests/test_random
 #tests_test_random_SOURCES = tests/test_random.c

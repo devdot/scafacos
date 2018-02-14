@@ -19,7 +19,9 @@
 
 
 
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +60,26 @@ FCSResult fcs_common_print_parameters(FCS handle)
 }
 
 
+FCSResult fcs_near_set_ocl(fcs_near_param_t *near_param, fcs_int ocl)
+{
+#if HAVE_OPENCL
+  if (fcs_near_param_set_ocl(near_param, ocl) == 0) return FCS_RESULT_SUCCESS;
+#endif /* HAVE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
+
+
+FCSResult fcs_near_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_conf)
+{
+#if HAVE_OPENCL
+  if (fcs_near_param_set_ocl_conf(near_param, ocl_conf)) return FCS_RESULT_SUCCESS;
+#endif /* HAVE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
+
+
 FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched)
 {
   char *param = *current;
@@ -69,10 +91,8 @@ FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue
 
 #define handle  near_param
 
-#if FCS_NEAR_OCL
-  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl",      near_param_set_ocl,      FCS_PARSE_VAL(fcs_int));
-  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_conf", near_param_set_ocl_conf, FCS_PARSE_VAL(fcs_p_char_t));
-#endif /* FCS_NEAR_OCL */
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl",      near_set_ocl,      FCS_PARSE_VAL(fcs_int));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_conf", near_set_ocl_conf, FCS_PARSE_VAL(fcs_p_char_t));
 
 #undef handle
 

@@ -589,7 +589,10 @@ void fcs_directc_run(fcs_directc_t *directc, MPI_Comm comm)
     fcs_near_set_param(&near, &directc->near_param);
 
     fcs_near_set_loop(&near, directc_coulomb_loop_fp);
+#if HAVE_OPENCL
     fcs_near_set_field_potential_source(&near, directc_coulomb_field_potential_source, directc_coulomb_field_potential_function);
+    fcs_near_set_compute_param_size(&near, 0);
+#endif /* HAVE_OPENCL */
     fcs_near_set_system(&near, directc->box_base, directc->box_a, directc->box_b, directc->box_c, periodic);
 #if POTENTIAL_CONST1
     fcs_float *charges1 = malloc(directc->max_nparticles * sizeof(fcs_float));
@@ -600,8 +603,6 @@ void fcs_directc_run(fcs_directc_t *directc, MPI_Comm comm)
 #endif
     fcs_near_set_max_particle_move(&near, directc->max_particle_move);
     fcs_near_set_resort(&near, directc->resort);
-
-    fcs_near_set_compute_param_size(&near, 0);
 
     fcs_near_field_solver(&near, fabs(directc->cutoff), NULL, comm);
 
