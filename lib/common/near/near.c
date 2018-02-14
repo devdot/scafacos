@@ -26,7 +26,16 @@
 
 #define FCS_NEAR_ASYNC      1
 #define FCS_NEAR_OCL_ASYNC  1
-#define FCS_NEAR_OCL_NEW    0
+#define FCS_NEAR_OCL_NEW    1
+
+#define COMPUTE                   1
+#define COMPUTE_BOX               1
+#define COMPUTE_REAL_NEIGHBOURS   1
+#define COMPUTE_GHOST_NEIGHBOURS  1
+#define COMPUTE_VERBOSE           0
+
+#define POTENTIAL_CONST1  0
+#define PRINT_PARTICLES   0
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,8 +59,6 @@
 
 #include "z_tools.h"
 #include "near.h"
-
-#define POTENTIAL_CONST1  0
 
 
 #if FCS_NEAR_OCL
@@ -114,8 +121,6 @@ do {                                                                        \
 # define TIMING_CMD(_cmd_)  Z_NOP()
 #endif
 #define TIMING_PRINT_PREFIX  "NEAR_TIMING: "
-
-/*#define PRINT_PARTICLES*/
 
 /* Z-curve ordering of boxes disabled (leads to insane costs for neighbor box search) */
 /*#define BOX_SFC*/
@@ -555,7 +560,7 @@ void fcs_near_set_resort(fcs_near_t *near, fcs_int resort)
 }
 
 
-#ifdef PRINT_PARTICLES
+#if PRINT_PARTICLES
 static void print_particles(fcs_int n, fcs_float *xyz, int size, int rank, MPI_Comm comm)
 {
   const int root = 0;
@@ -720,7 +725,7 @@ static void make_boxes_skip_format(fcs_int nlocal, box_t *boxes)
 #endif
 
 
-#ifdef PRINT_PARTICLES
+#if PRINT_PARTICLES
 static void print_boxes(fcs_int nlocal, box_t *boxes)
 {
   fcs_int i;
@@ -836,6 +841,31 @@ static const char *fcs_ocl_near_compute_source_head =
 #else
   "#define POTENTIAL_CONST1  0\n"
 #endif
+#if COMPUTE
+  "#define COMPUTE  1\n"
+#else
+  "#define COMPUTE  0\n"
+#endif
+#if COMPUTE_BOX
+  "#define COMPUTE_BOX  1\n"
+#else
+  "#define COMPUTE_BOX  0\n"
+#endif
+#if COMPUTE_REAL_NEIGHBOURS
+  "#define COMPUTE_REAL_NEIGHBOURS  1\n"
+#else
+  "#define COMPUTE_REAL_NEIGHBOURS  0\n"
+#endif
+#if COMPUTE_GHOST_NEIGHBOURS
+  "#define COMPUTE_GHOST_NEIGHBOURS  1\n"
+#else
+  "#define COMPUTE_GHOST_NEIGHBOURS  0\n"
+#endif
+#if COMPUTE_VERBOSE
+  "#define COMPUTE_VERBOSE  1\n"
+#else
+  "#define COMPUTE_VERBOSE  0\n"
+#endif
   ;
 
 static const char *fcs_ocl_compute_kernel_source_function = "fcs_ocl_near_coulomb_field_potential";
@@ -891,6 +921,7 @@ static const char *fcs_ocl_compute_kernel_source =
   "  fcs_float fs_x, fs_y, fs_z, ps;\n"
   "  size_t i = get_global_id(0);\n"
   "  fcs_int j,m,n,lb,a,b;\n"
+#if COMPUTE
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
   "    fs_x = fs_y = fs_z = 0;\n"
@@ -899,6 +930,7 @@ static const char *fcs_ocl_compute_kernel_source =
   "    ax = positions[3 * a + 0];\n"
   "    ay = positions[3 * a + 1];\n"
   "    az = positions[3 * a + 2];\n"
+#if COMPUTE_BOX
   "    for ( m=0; m<boxes[i*4+1]; m++)\n"
   "    {\n"
   "      b = boxes[i * 4] + m;\n"
@@ -921,7 +953,9 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
+#endif /* COMPUTE_BOX */
   "\n"
+#if COMPUTE_REAL_NEIGHBOURS
   "    for (m=0;m<boxes[4*i+2]; m++)\n"
   "    {\n"
   "      lb = linked[i * 13 + m];\n"
@@ -969,11 +1003,13 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
+#endif /* COMPUTE_REAL_NEIGHBOURS */
   "    field[3 * a + 0] += fs_x;\n"
   "    field[3 * a + 1] += fs_y;\n"
   "    field[3 * a + 2] += fs_z;\n"
   "    pots[a] += ps;\n"
   "  }\n"
+#endif /* COMPUTE */
   "}\n"
   "\n"
   "__kernel void compute_box_ghosts(fcs_float cutoff, __global const void *param, __global fcs_float *positions, __global fcs_float *field, __global fcs_float *pots, __global fcs_int *boxes, __global fcs_float *gpositions, __global fcs_float *gcharges,__global fcs_int *gboxes, __global fcs_int *glinklist, __global fcs_int *linked)\n"
@@ -983,6 +1019,7 @@ static const char *fcs_ocl_compute_kernel_source =
   "  fcs_float fs_x, fs_y, fs_z, ps;"
   "  size_t i = get_global_id(0);\n"
   "  fcs_int j,m,n,lb,a,b;\n"
+#if COMPUTE
   "  for ( j=0; j<boxes[4*i+1]; j++)\n"
   "  {\n"
   "    fs_x = fs_y = fs_z = 0;\n"
@@ -992,6 +1029,7 @@ static const char *fcs_ocl_compute_kernel_source =
   "    ay = positions[3 * a + 1];\n"
   "    az = positions[3 * a + 2];\n"
   "\n"
+#if COMPUTE_GHOST_NEIGHBOURS
   "    for (m=0;m<glinklist[2*i]; m++)\n"
   "    {\n"
   "      lb = linked[27 * i + m];\n"
@@ -1015,11 +1053,13 @@ static const char *fcs_ocl_compute_kernel_source =
 #endif
   "      }\n"
   "    }\n"
+#endif /* COMPUTE_GHOST_NEIGHBOURS */
   "    field[3 * a + 0] += fs_x;\n"
   "    field[3 * a + 1] += fs_y;\n"
   "    field[3 * a + 2] += fs_z;\n"
   "    pots[a] += ps;\n"
   "  } \n"
+#endif /* COMPUTE */
   "}\n"
   ;
 
@@ -1349,11 +1389,15 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nparticles * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
-  ocl->mem_box_info             = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, &_err));
-  ocl->mem_real_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, &_err));
-
+  ocl->mem_box_info = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, &_err));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_box_info, CL_FALSE, 0, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_real_neighbour_boxes, CL_FALSE, 0, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, 0, NULL, NULL));
+
+  if (ocl->nreal_neighbour_boxes > 0)
+  {
+    ocl->mem_real_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, &_err));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_real_neighbour_boxes, CL_FALSE, 0, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, 0, NULL, NULL));
+
+  } else ocl->mem_real_neighbour_boxes = NULL;
 
   if (nghosts > 0)
   {
@@ -1363,24 +1407,27 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, nghosts * 3 * sizeof(fcs_float), gpositions, 0, NULL, NULL));
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, nghosts * sizeof(fcs_float), gcharges, 0, NULL, NULL));
 
-    ocl->mem_ghost_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, &_err));
+    if (ocl->nghost_neighbour_boxes > 0)
+    {
+      ocl->mem_ghost_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, &_err));
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_ghost_neighbour_boxes, CL_FALSE, 0, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, 0, NULL, NULL));
 
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_ghost_neighbour_boxes, CL_FALSE, 0, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, 0, NULL, NULL));
+    } else ocl->mem_ghost_neighbour_boxes = NULL;
   }
 
   CL_CHECK(clSetKernelArg(ocl->compute_kernel, 0, sizeof(cutoff), &cutoff));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 1, sizeof(ocl->mem_param), &ocl->mem_param));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 2, sizeof(ocl->mem_positions), &ocl->mem_positions));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 3, sizeof(ocl->mem_charges), &ocl->mem_charges));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 4, sizeof(ocl->mem_field), &ocl->mem_field));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 5, sizeof(ocl->mem_potentials), &ocl->mem_potentials));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 6, sizeof(ocl->mem_box_info), &ocl->mem_box_info));
-  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 7, sizeof(ocl->mem_real_neighbour_boxes), &ocl->mem_real_neighbour_boxes));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 1, sizeof(cl_mem), &ocl->mem_param));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 2, sizeof(cl_mem), &ocl->mem_positions));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 3, sizeof(cl_mem), &ocl->mem_charges));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 4, sizeof(cl_mem), &ocl->mem_field));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 5, sizeof(cl_mem), &ocl->mem_potentials));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 6, sizeof(cl_mem), &ocl->mem_box_info));
+  CL_CHECK(clSetKernelArg(ocl->compute_kernel, 7, sizeof(cl_mem), &ocl->mem_real_neighbour_boxes));
   if (nghosts > 0)
   {
-    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 8, sizeof(ocl->mem_gpositions), &ocl->mem_gpositions));
-    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 9, sizeof(ocl->mem_gcharges), &ocl->mem_gcharges));
-    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 10, sizeof(ocl->mem_ghost_neighbour_boxes), &ocl->mem_ghost_neighbour_boxes));
+    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 8, sizeof(cl_mem), &ocl->mem_gpositions));
+    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 9, sizeof(cl_mem), &ocl->mem_gcharges));
+    CL_CHECK(clSetKernelArg(ocl->compute_kernel, 10, sizeof(cl_mem), &ocl->mem_ghost_neighbour_boxes));
 
   } else
   {
@@ -1418,14 +1465,14 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
   CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
 
   CL_CHECK(clReleaseMemObject(ocl->mem_box_info));
-  CL_CHECK(clReleaseMemObject(ocl->mem_real_neighbour_boxes));
+  if (ocl->mem_real_neighbour_boxes) CL_CHECK(clReleaseMemObject(ocl->mem_real_neighbour_boxes));
 
   if (nghosts > 0)
   {
     CL_CHECK(clReleaseMemObject(ocl->mem_gpositions));
     CL_CHECK(clReleaseMemObject(ocl->mem_gcharges));
 
-    CL_CHECK(clReleaseMemObject(ocl->mem_ghost_neighbour_boxes));
+    if (ocl->mem_ghost_neighbour_boxes) CL_CHECK(clReleaseMemObject(ocl->mem_ghost_neighbour_boxes));
   }
 
   return 0;
@@ -1749,10 +1796,10 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
   if (near->context->ghost_boxes) create_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_indices, near->box_base, near->box_a, near->box_b, near->box_c, near->context->periodicity, near->context->cutoff);
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[1]);
 
-#ifdef PRINT_PARTICLES
+#if PRINT_PARTICLES
   printf("real:\n");
   print_particles(near->nparticles, near->positions, near->context->comm_size, near->context->comm_rank, near->context->comm);
-  if (ghost_boxes)
+  if (near->context->ghost_boxes)
   {
     printf("ghost:\n");
     print_particles(near->nghosts, near->ghost_positions, near->context->comm_size, near->context->comm_rank, near->context->comm);
@@ -1769,7 +1816,7 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
   if (near->context->ghost_boxes) make_boxes_skip_format(near->nghosts, near->context->ghost_boxes);
 #endif
 
-#ifdef PRINT_PARTICLES
+#if PRINT_PARTICLES
   print_boxes(near->nparticles, near->context->real_boxes);
 #endif
 
@@ -1829,10 +1876,9 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
       TIMING_START(_t);
       current_box_info[0] = current_start;
-      current_box_info[1] = current_size;
+      current_box_info[1] = current_start + current_size;
 
-      current_box_info[2] = current_real_neighbour_start / 2;
-      current_box_info[3] = 0;
+      current_box_info[2] = current_box_info[3] = current_real_neighbour_start / 2;
 
       for (i = 0; i < nreal_neighbours_full; ++i)
       {
@@ -1841,7 +1887,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
         if (real_sizes[i] == 0) continue;
 
         near->context->ocl.real_neighbour_boxes[current_real_neighbour_start + 0] = real_starts[i];
-        near->context->ocl.real_neighbour_boxes[current_real_neighbour_start + 1] = real_sizes[i];
+        near->context->ocl.real_neighbour_boxes[current_real_neighbour_start + 1] = real_starts[i] + real_sizes[i];
 
         current_real_neighbour_start += 2;
         ++current_box_info[3];
@@ -1849,8 +1895,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
         real_lasts[i] = real_starts[i] + real_sizes[i];
       }
 
-      current_box_info[4] = current_ghost_neighbour_start / 2;
-      current_box_info[5] = 0;
+      current_box_info[4] = current_box_info[5] = current_ghost_neighbour_start / 2;
 
       if (near->context->ghost_boxes)
       for (i = 0; i < nghost_neighbours; ++i)
@@ -1860,7 +1905,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
         if (ghost_sizes[i] == 0) continue;
 
         near->context->ocl.ghost_neighbour_boxes[current_ghost_neighbour_start + 0] = ghost_starts[i];
-        near->context->ocl.ghost_neighbour_boxes[current_ghost_neighbour_start + 1] = ghost_sizes[i];
+        near->context->ocl.ghost_neighbour_boxes[current_ghost_neighbour_start + 1] = ghost_starts[i] + ghost_sizes[i];
 
         current_ghost_neighbour_start += 2;
         ++current_box_info[5];
@@ -1877,7 +1922,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     near->context->ocl.nreal_neighbour_boxes = current_real_neighbour_start / 2;
     near->context->ocl.nghost_neighbour_boxes = current_ghost_neighbour_start / 2;
 
-/*
+#if COMPUTE_VERBOSE
     printf("nboxes: %" FCS_LMOD_INT "d\n", near->context->ocl.nboxes);
     printf("nreal_neighbour_boxes: %" FCS_LMOD_INT "d\n", near->context->ocl.nreal_neighbour_boxes);
     printf("nghost_neighbour_boxes: %" FCS_LMOD_INT "d\n", near->context->ocl.nghost_neighbour_boxes);
@@ -1900,7 +1945,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
       printf("nghost_neighbour_boxes[%" FCS_LMOD_INT "d]: %" FCS_LMOD_INT "d, %" FCS_LMOD_INT "d\n", i,
         near->context->ocl.ghost_neighbour_boxes[2 * i + 0], near->context->ocl.ghost_neighbour_boxes[2 * i + 1]);
     }
-*/
+#endif /* COMPUTE_VERBOSE */
 
     fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
       near->nparticles, near->positions, near->charges, near->potentials, near->field,
@@ -2251,6 +2296,15 @@ static fcs_int near_compute_release(fcs_near_t *near)
 
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[0]);
 
+#if PRINT_PARTICLES
+  printf("%d: result = %" FCS_LMOD_INT "d\n", near->context->comm_rank, near->nparticles);
+  for (fcs_int i = 0; i < near->nparticles; ++i)
+  {
+    printf("%" FCS_LMOD_INT "d: %" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f,%" FCS_LMOD_FLOAT "f  %" FCS_LMOD_FLOAT "f\n",
+      i, near->field[3 * i + 0], near->field[3 * i + 1], near->field[3 * i + 2], near->potentials[i]);
+  }
+#endif
+
   TIMING_CMD(
     if (near->context->comm_rank == 0)
       printf(TIMING_PRINT_PREFIX "fcs_near_compute: %f  %f  %f  %f  %f  %f  %f\n", t[0], t[1], t[2], t[3], t[4], t[5], t[6]);
@@ -2460,18 +2514,20 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
 
   fcs_gridsort_get_real_particles(&gridsort, &nlocal_s_real, &positions_s_real, &charges_s_real, &indices_s_real);
 
-/*  printf("%d: sorted (real) = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s_real);
+#if PRINT_PARTICLES
+  printf("%d: sorted (real) = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s_real);
   for (int i = 0; i < nlocal_s_real; ++i)
   {
     printf("  %d: %d: %f,%f,%f  %f  " idx_fmt "\n", comm_rank, i, positions_s[3 * i + 0], positions_s[3 * i + 1], positions_s[3 * i + 2], charges_s[i], idx_val(indices_s[i]));
-  }*/
+  }
 
 #ifdef SEPARATE_GHOSTS
-/*  printf("%d: sorted (ghost) = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s_ghost);
+  printf("%d: sorted (ghost) = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s_ghost);
   for (int i = 0; i < nlocal_s_ghost; ++i)
   {
     printf("  %d: %f,%f,%f  " idx_fmt "\n", i, positions_s[3 * (nlocal_s_real + i) + 0], positions_s[3 * (nlocal_s_real + i) + 1], positions_s[3 * (nlocal_s_real + i) + 2], idx_val(indices_s[nlocal_s_real + i]));
-  }*/
+  }
+#endif
 #endif
 
   if (near->field) field_s = malloc(nlocal_s_real * 3 * sizeof(fcs_float));
@@ -2522,11 +2578,13 @@ fcs_int fcs_near_field_solver(fcs_near_t *near,
 
   fcs_near_destroy(&near_s);
 
-/*  printf("%d: result = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s);
+#if PRINT_PARTICLES
+  printf("%d: result = %" FCS_LMOD_INT "d\n", comm_rank, nlocal_s);
   for (int i = 0; i < nlocal_s_real; ++i)
   {
     printf("%d: %f,%f,%f  %f\n", i, field_s[3 * i + 0], field_s[3 * i + 1], field_s[3 * i + 2], potentials_s[i]);
-  }*/
+  }
+#endif
 
   fcs_gridsort_set_sorted_results(&gridsort, nlocal_s_real, field_s, potentials_s);
   fcs_gridsort_set_results(&gridsort, near->max_nparticles, near->field, near->potentials);

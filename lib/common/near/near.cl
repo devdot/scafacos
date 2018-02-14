@@ -1,11 +1,6 @@
 
 typedef void HERE_COMES_THE_CODE;
 
-#define COMPUTE                   1
-#define COMPUTE_BOX               1
-#define COMPUTE_REAL_NEIGHBOURS   1
-#define COMPUTE_GHOST_NEIGHBOURS  1
-
 
 static void fcs_ocl_near_coulomb_field_potential(__global const void *param, fcs_float dist, fcs_float *f, fcs_float *p)
 {
@@ -23,34 +18,36 @@ __kernel void fcs_ocl_near_compute(fcs_float cutoff, __global void *param,
   fcs_float r_ij, f, p, fx;
   fcs_float x0, y0, z0, dx, dy, dz;
   fcs_float fs_x, fs_y, fs_z, ps;
+  fcs_int i, j, k;
 
   size_t b = get_global_id(0);
 
-  fcs_int i, j, k, nb;
-  fcs_int p0, p1;
+#if COMPUTE_VERBOSE
+  printf("b: %d\n", (int) b);
+#endif
 
 #if COMPUTE
-  for (i = 0; i < box_info[6 * b + 1]; ++i)
+  for (i = box_info[6 * b + 0]; i < box_info[6 * b + 1]; ++i)
   {
     fs_x = fs_y = fs_z = 0;
     ps = 0;
 
-    p0 = box_info[6 * b + 0] + i;
-
-    x0 = positions[3 * p0 + 0];
-    y0 = positions[3 * p0 + 1];
-    z0 = positions[3 * p0 + 2];
+    x0 = positions[3 * i + 0];
+    y0 = positions[3 * i + 1];
+    z0 = positions[3 * i + 2];
 
 #if COMPUTE_BOX
     for (j = i + 1; j < box_info[6 * b + 1]; ++j)
     {
-      p1 = box_info[6 * b + 0] + j;
-
-      dx = positions[3 * p1 + 0] - x0;
-      dy = positions[3 * p1 + 1] - y0;
-      dz = positions[3 * p1 + 2] - z0;
+      dx = positions[3 * j + 0] - x0;
+      dy = positions[3 * j + 1] - y0;
+      dz = positions[3 * j + 2] - z0;
 
       r_ij = fcs_sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+#if COMPUTE_VERBOSE
+      printf("box: %d vs. %d -> %f\n", (int) i, (int) j, (float) r_ij);
+#endif /* COMPUTE_VERBOSE */
 
       if (r_ij > cutoff) continue;
 
@@ -69,27 +66,27 @@ __kernel void fcs_ocl_near_compute(fcs_float cutoff, __global void *param,
 #if POTENTIAL_CONST1
       ps += 1;
       potentials[j] += 1;
-#else
+#else /* POTENTIAL_CONST1 */
       ps += p * charges[j];
       potentials[j] += p * charges[i];
-#endif
+#endif /* POTENTIAL_CONST1 */
     }
 #endif /* COMPUTE_BOX */
 
 #if COMPUTE_REAL_NEIGHBOURS
-    for (k = 0; k < box_info[6 * b + 3]; ++k)
+    for (k = box_info[6 * b + 2]; k < box_info[6 * b + 3]; ++k)
     {
-      nb = box_info[6 * b + 2] + k;
-
-      for (j = 0; j < real_neighbour_boxes[2 * nb + 1]; ++j)
+      for (j = real_neighbour_boxes[2 * k + 0]; j < real_neighbour_boxes[2 * k + 1]; ++j)
       {
-        p1 = real_neighbour_boxes[2 * nb + 0] + j;
-
-        dx = positions[3 * p1 + 0] - x0;
-        dy = positions[3 * p1 + 1] - y0;
-        dz = positions[3 * p1 + 2] - z0;
+        dx = positions[3 * j + 0] - x0;
+        dy = positions[3 * j + 1] - y0;
+        dz = positions[3 * j + 2] - z0;
 
         r_ij = fcs_sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+#if COMPUTE_VERBOSE
+        printf("real: %d vs. %d -> %f\n", (int) i, (int) j, (float) r_ij);
+#endif /* COMPUTE_VERBOSE */
 
         if (r_ij > cutoff) continue;
 
@@ -101,27 +98,27 @@ __kernel void fcs_ocl_near_compute(fcs_float cutoff, __global void *param,
         fs_z += fx * dz;
 #if POTENTIAL_CONST1
         ps += 1;
-#else
+#else /* POTENTIAL_CONST1 */
         ps += p * charges[j];
-#endif
+#endif /* POTENTIAL_CONST1 */
       }
     }
 #endif /* COMPUTE_REAL_NEIGHBOURS */
 
 #if COMPUTE_GHOST_NEIGHBOURS
-    for (k = 0; k < box_info[6 * b + 5]; ++k)
+    for (k = box_info[6 * b + 4]; k < box_info[6 * b + 5]; ++k)
     {
-      nb = box_info[6 * b + 4] + k;
-
-      for (j = 0; j < ghost_neighbour_boxes[2 * nb + 1]; ++j)
+      for (j = ghost_neighbour_boxes[2 * k + 0]; j < ghost_neighbour_boxes[2 * k + 1]; ++j)
       {
-        p1 = ghost_neighbour_boxes[2 * nb + 0] + j;
-
-        dx = gpositions[3 * p1 + 0] - x0;
-        dy = gpositions[3 * p1 + 1] - y0;
-        dz = gpositions[3 * p1 + 2] - z0;
+        dx = gpositions[3 * j + 0] - x0;
+        dy = gpositions[3 * j + 1] - y0;
+        dz = gpositions[3 * j + 2] - z0;
 
         r_ij = fcs_sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+#if COMPUTE_VERBOSE
+        printf("ghost: %d vs. %d -> %f\n", (int) i, (int) j, (float) r_ij);
+#endif /* COMPUTE_VERBOSE */
 
         if (r_ij > cutoff) continue;
 
@@ -133,18 +130,18 @@ __kernel void fcs_ocl_near_compute(fcs_float cutoff, __global void *param,
         fs_z += fx * dz;
 #if POTENTIAL_CONST1
         ps += 1;
-#else
-        ps += p * charges[j];
-#endif
+#else /* POTENTIAL_CONST1 */
+        ps += p * gcharges[j];
+#endif /* POTENTIAL_CONST1 */
       }
     }
 #endif /* COMPUTE_GHOST_NEIGHBOURS */
 
-    field[3 * p0 + 0] += fs_x;
-    field[3 * p0 + 1] += fs_y;
-    field[3 * p0 + 2] += fs_z;
+    field[3 * i + 0] += fs_x;
+    field[3 * i + 1] += fs_y;
+    field[3 * i + 2] += fs_z;
 
-    potentials[p0] += ps;
+    potentials[i] += ps;
   }
 #endif /* COMPUTE */
 }

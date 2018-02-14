@@ -33,9 +33,7 @@ for f in ${FILES} ; do
     ( if [ -n "${HEXPAD}" ] ; then ${SED} -e "s/0x  ,/0x00,/g" ; else ${CAT} ; fi ) | \
     ( if [ "${HEXNULL}" = "yes" ] ; then ${SED} -e "\$s/\$/ 0x00/" ; else ${CAT} ; fi )
   else
-    while read l ; do
-      echo "\"${l}\\n\""
-    done
+    ${SED} -e 's/"/\\"/g' -e 's/\\n/\\\\n/g' -e 's/^/\"/' -e 's/$/\\n\"/'
   fi ) | \
   ${CAT}
 
