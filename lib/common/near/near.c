@@ -1375,7 +1375,7 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 #if FCS_NEAR_OCL_NEW
 
 static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const void *compute_param, fcs_int compute_param_size,
-  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
+  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *field, fcs_float *potentials,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges)
 {
   if (compute_param_size > 0)
@@ -1450,7 +1450,7 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   return 0;
 }
 
-static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *potentials, fcs_float *field, fcs_int nghosts)
+static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *field, fcs_float *potentials, fcs_int nghosts)
 {
   CL_CHECK(clWaitForEvents(1, &ocl->kernel_completions[0]));
 
@@ -1488,7 +1488,7 @@ static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int npartic
 #else /* FCS_NEAR_OCL_NEW */
 
 static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const void *compute_param, fcs_int compute_param_size,
-  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *potentials, fcs_float *field,
+  fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *field, fcs_float *potentials,
   fcs_int nboxes, fcs_int *boxes, fcs_int *linked, fcs_int *linkedback,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges,
   fcs_int ngboxes, fcs_int *gboxes, fcs_int *glinklist, fcs_int *glinked)
@@ -1568,7 +1568,7 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   return 0;
 }
 
-static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *potentials, fcs_float *field, fcs_int nghosts)
+static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *field, fcs_float *potentials, fcs_int nghosts)
 {
   CL_CHECK(clWaitForEvents(ocl->nkernel_completions, ocl->kernel_completions));
 
@@ -1955,12 +1955,12 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 #endif /* COMPUTE_VERBOSE */
 
     fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
-      near->nparticles, near->positions, near->charges, near->potentials, near->field,
+      near->nparticles, near->positions, near->charges, near->field, near->potentials,
       near->nghosts, near->ghost_positions, near->ghost_charges);
 
 #if !FCS_NEAR_OCL_ASYNC
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field);
+    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials);
 
     near->context->ocl.nboxes = 0;
     free(near->context->ocl.box_info);
@@ -2089,14 +2089,14 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     }
 
     fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
-      near->nparticles, near->positions, near->charges, near->potentials, near->field,
+      near->nparticles, near->positions, near->charges, near->field, near->potentials,
       near->context->ocl.nboxes, near->context->ocl.boxlist, near->context->ocl.linkedboxes, near->context->ocl.linkedboxesback,
       near->nghosts, near->ghost_positions, near->ghost_charges,
       near->context->ocl.nghostboxes, near->context->ocl.ghostboxlist, near->context->ocl.ghostlinked, near->context->ocl.ghostlinkedboxes);
 
 #if !FCS_NEAR_OCL_ASYNC
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field);
+    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials);
 
     if (near->context->ghost_boxes)
     {
@@ -2178,7 +2178,7 @@ static fcs_int near_compute_main_join(fcs_near_t *near)
   {
 #if FCS_NEAR_OCL_NEW
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field, near->nghosts);
+    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials, near->nghosts);
 
     if (near->context->ghost_boxes)
     {
@@ -2196,7 +2196,7 @@ static fcs_int near_compute_main_join(fcs_near_t *near)
 
 #if FCS_NEAR_OCL_ASYNC
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->potentials, near->field, near->nghosts);
+    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials, near->nghosts);
 
     if (near->context->ghost_boxes)
     {
