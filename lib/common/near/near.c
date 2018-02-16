@@ -510,10 +510,10 @@ void fcs_near_set_compute_param_size(fcs_near_t *near, fcs_int compute_param_siz
 void fcs_near_set_field_potential_source(fcs_near_t *near, const char *compute_field_potential_source, const char *compute_field_potential_function)
 {
   if (near->compute_field_potential_source) free(near->compute_field_potential_source);
-  near->compute_field_potential_source = strdup(compute_field_potential_source);
+  near->compute_field_potential_source = (compute_field_potential_source)?strdup(compute_field_potential_source):NULL;
 
   if (near->compute_field_potential_function) free(near->compute_field_potential_function);
-  near->compute_field_potential_function = strdup(compute_field_potential_function);
+  near->compute_field_potential_function = (compute_field_potential_function)?strdup(compute_field_potential_function):NULL;
 }
 
 

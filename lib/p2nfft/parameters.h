@@ -25,6 +25,7 @@
 #include <config.h>
 #endif
 
+#include "common/near/near.h"
 #include "FCSCommon.h"
 #include "FCSResult.h"
 
