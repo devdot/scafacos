@@ -286,6 +286,11 @@ FCSResult fcs_unset_r_cut(FCS handle);
  */
 FCSResult fcs_get_r_cut(FCS handle, fcs_float *r_cut);
 
+
+FCSResult fcs_set_ocl(FCS handle, fcs_int ocl);
+FCSResult fcs_get_ocl(FCS handle, fcs_int *ocl);
+
+
 /**
  * @brief function to set the parameters of the FCS solver based on a parameter string
  * @param handle FCS-object representing an FCS solver

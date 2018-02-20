@@ -23,15 +23,22 @@
 #include <config.h>
 #endif
 
-#include "FCSCommon.h"
-#include "FCSInterface.h"
-#include "fcs_common.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
+#if HAVE_OPENCL
+# ifdef __APPLE__
+#  include <OpenCL/opencl.h>
+# else
+#  include <CL/cl.h>
+# endif
+#endif /* HAVE_OPENCL */
+
+#include "FCSCommon.h"
+#include "FCSInterface.h"
+#include "fcs_common.h"
 
 /**
  * @brief function to check whether all initial parameters are set
@@ -121,6 +128,10 @@ FCSResult fcs_init(FCS *new_handle, const char* method_name, MPI_Comm communicat
   handle->total_particles = handle->max_local_particles = -1;
 
   handle->near_field_flag = 1;
+
+#if HAVE_OPENCL
+  handle->ocl = 0;
+#endif
 
 #ifdef FCS_ENABLE_FMM
   handle->fmm_param = NULL;
@@ -707,6 +718,28 @@ FCSResult fcs_get_r_cut(FCS handle, fcs_float *r_cut)
 }
 
 
+FCSResult fcs_set_ocl(FCS handle, fcs_int ocl)
+{
+#if HAVE_OPENCL
+  handle->ocl = ocl;
+  return FCS_RESULT_SUCCESS;
+#endif /* HAVE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
+
+
+FCSResult fcs_get_ocl(FCS handle, fcs_int *ocl)
+{
+#if HAVE_OPENCL
+  *ocl = handle->ocl;
+  return FCS_RESULT_SUCCESS;
+#endif /* HAVE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
+
+
 /**
  * set the parameters of the FCS solver based on a parameter string
  */
@@ -750,6 +783,7 @@ FCSResult fcs_set_parameters(FCS handle, const char *parameters, fcs_bool contin
     FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("total_particles",         set_total_particles, FCS_PARSE_VAL(fcs_int));
     FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("r_cut",                   set_r_cut,           FCS_PARSE_VAL(fcs_float));
     FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("require_virial",          set_compute_virial,  FCS_PARSE_VAL(fcs_int));
+    FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("ocl",                     set_ocl,             FCS_PARSE_VAL(fcs_int));
     FCS_PARSE_IF_PARAM_THEN_FUNC2_GOTO_NEXT("",                        set_tolerance,       FCS_PARSE_VAL(fcs_int),                                     FCS_PARSE_VAL(fcs_float));
     FCS_PARSE_IF_PARAM_THEN_FUNC2_GOTO_NEXT("tolerance_energy",        set_tolerance,       FCS_PARSE_CONST(fcs_int, FCS_TOLERANCE_TYPE_ENERGY),        FCS_PARSE_VAL(fcs_float));
     FCS_PARSE_IF_PARAM_THEN_FUNC2_GOTO_NEXT("tolerance_energy_rel",    set_tolerance,       FCS_PARSE_CONST(fcs_int, FCS_TOLERANCE_TYPE_ENERGY_REL),    FCS_PARSE_VAL(fcs_float));
@@ -802,6 +836,11 @@ FCSResult fcs_print_parameters(FCS handle)
     fcs_get_box_origin(handle)[0], fcs_get_box_origin(handle)[1], fcs_get_box_origin(handle)[2]);
   printf("periodicity: %c %c %c\n", ((fcs_get_periodicity(handle)[0] == 1)?'T':'F'), ((fcs_get_periodicity(handle)[1] == 1)?'T':'F'),((fcs_get_periodicity(handle)[2] == 1)?'T':'F'));
   printf("total particles: %" FCS_LMOD_INT "d\n", fcs_get_total_particles(handle));
+#if HAVE_OPENCL
+  fcs_int ocl = 0;
+  fcs_get_ocl(handle, &ocl);
+  printf("ocl: %" FCS_LMOD_INT "d\n", ocl);
+#endif /* HAVE_OPENCL */
   printf("solver specific data:\n");
 
   if (handle->print_parameters)
@@ -834,6 +873,14 @@ FCSResult fcs_tune(FCS handle, fcs_int local_particles,
     return fcs_result_create(FCS_ERROR_MISSING_ELEMENT, __func__, "not all needed data has been inserted into the given handle");
 
   fcs_set_values_changed(handle, 0);
+
+#if HAVE_OPENCL
+  if (handle->ocl)
+  {
+    cl_uint nplatforms;
+    clGetPlatformIDs(0, NULL, &nplatforms);
+  }
+#endif /* HAVE_OPENCL */
 
   if (handle->tune == NULL)
     return fcs_result_create(FCS_ERROR_NOT_IMPLEMENTED, __func__, "Tuning solver method '%s' not implemented", fcs_get_method_name(handle));

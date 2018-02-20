@@ -157,6 +157,10 @@ typedef struct _FCS_t
      1 = done by library routine*/
   fcs_int near_field_flag;
 
+#if HAVE_OPENCL
+  fcs_int ocl;
+#endif
+
   /* structures containing the method-specific parameters */
 #ifdef FCS_ENABLE_DIRECT
   fcs_direct_parameters direct_param;
