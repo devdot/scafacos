@@ -24,9 +24,10 @@
 # include <config.h>
 #endif
 
-#define FCS_NEAR_ASYNC      1
-#define FCS_NEAR_OCL_ASYNC  1
-#define FCS_NEAR_OCL_NEW    1
+#define FCS_NEAR_ASYNC            1
+#define FCS_NEAR_OCL_ASYNC        1
+#define FCS_NEAR_OCL_NEW          1
+#define FCS_NEAR_OCL_WAIT_WRITE   0
 
 #define COMPUTE                   1
 #define COMPUTE_BOX               1
@@ -1374,10 +1375,18 @@ static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
 
 #if FCS_NEAR_OCL_NEW
 
-static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cutoff, const void *compute_param, fcs_int compute_param_size,
+static fcs_int fcs_ocl_compute_near_prepare(fcs_ocl_context_t *ocl, fcs_float cutoff, const void *compute_param, fcs_int compute_param_size,
   fcs_int nparticles, fcs_float *positions, fcs_float *charges, fcs_float *field, fcs_float *potentials,
   fcs_int nghosts, fcs_float *gpositions, fcs_float *gcharges)
 {
+#if FCS_NEAR_OCL_WAIT_WRITE
+  int nwrite_events = 0;
+  cl_event write_events[4];
+# define WRITE_EVENT  &write_events[nwrite_events++]
+#else /* FCS_NEAR_OCL_WAIT_WRITE */
+# define WRITE_EVENT  NULL
+#endif /* FCS_NEAR_OCL_WAIT_WRITE */
+
   if (compute_param_size > 0)
   {
     ocl->mem_param  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, compute_param_size, (void *) compute_param, &_err));
@@ -1397,12 +1406,12 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nparticles * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
   ocl->mem_box_info = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, &_err));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_box_info, CL_FALSE, 0, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_box_info, CL_FALSE, 0, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, 0, NULL, WRITE_EVENT));
 
   if (ocl->nreal_neighbour_boxes > 0)
   {
     ocl->mem_real_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, &_err));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_real_neighbour_boxes, CL_FALSE, 0, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_real_neighbour_boxes, CL_FALSE, 0, ocl->nreal_neighbour_boxes * 2 * sizeof(fcs_int), ocl->real_neighbour_boxes, 0, NULL, WRITE_EVENT));
 
   } else ocl->mem_real_neighbour_boxes = NULL;
 
@@ -1412,15 +1421,20 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     ocl->mem_gcharges   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nghosts * sizeof(fcs_float), gcharges, &_err));
 
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, nghosts * 3 * sizeof(fcs_float), gpositions, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, nghosts * sizeof(fcs_float), gcharges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, nghosts * sizeof(fcs_float), gcharges, 0, NULL, WRITE_EVENT));
 
     if (ocl->nghost_neighbour_boxes > 0)
     {
       ocl->mem_ghost_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, &_err));
-      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_ghost_neighbour_boxes, CL_FALSE, 0, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, 0, NULL, NULL));
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_ghost_neighbour_boxes, CL_FALSE, 0, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, 0, NULL, WRITE_EVENT));
 
     } else ocl->mem_ghost_neighbour_boxes = NULL;
   }
+
+#if FCS_NEAR_OCL_WAIT_WRITE
+  CL_CHECK(clWaitForEvents(nwrite_events, write_events));
+  while (nwrite_events > 0) CL_CHECK(clReleaseEvent(write_events[--nwrite_events]));
+#endif /* FCS_NEAR_OCL_WAIT_WRITE */
 
   CL_CHECK(clSetKernelArg(ocl->compute_kernel, 0, sizeof(cutoff), &cutoff));
   CL_CHECK(clSetKernelArg(ocl->compute_kernel, 1, sizeof(cl_mem), &ocl->mem_param));
@@ -1443,6 +1457,11 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
     CL_CHECK(clSetKernelArg(ocl->compute_kernel, 10, sizeof(cl_mem), NULL));
   }
 
+  return 0;
+}
+
+static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl)
+{
   size_t global_work_size[1] = { ocl->nboxes };
 
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->compute_kernel, 1, NULL, global_work_size, NULL, 0, NULL, &ocl->kernel_completions[0]));
@@ -1450,10 +1469,15 @@ static fcs_int fcs_ocl_compute_near_start(fcs_ocl_context_t *ocl, fcs_float cuto
   return 0;
 }
 
-static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *field, fcs_float *potentials, fcs_int nghosts)
+static fcs_int fcs_ocl_compute_near_join(fcs_ocl_context_t *ocl)
 {
   CL_CHECK(clWaitForEvents(1, &ocl->kernel_completions[0]));
 
+  return 0;
+}
+
+static fcs_int fcs_ocl_compute_near_release(fcs_ocl_context_t *ocl, fcs_int nparticles, fcs_float *field, fcs_float *potentials, fcs_int nghosts)
+{
   CL_CHECK(clReleaseEvent(ocl->kernel_completions[0]));
 
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
@@ -1686,7 +1710,7 @@ typedef struct _fcs_near_compute_context_t
 #endif /* FCS_NEAR_OCL */
 
 #ifdef DO_TIMING
-  double t[7];
+  double t[10];
 #endif
 
   int comm_size, comm_rank;
@@ -1846,10 +1870,12 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
   double _t, *t = near->context->t;
 #endif
 
+  TIMING_SYNC(near->context->comm); TIMING_START(t[3]);
+
   current_last = 0;
   for (i = 0; i < max_nboxes; ++i) real_lasts[i] = ghost_lasts[i] = 0;
 
-  TIMING_SYNC(near->context->comm); TIMING_START(t[3]);
+  TIMING_SYNC(near->context->comm); TIMING_START(t[4]);
 
 #if FCS_NEAR_OCL
   if (near->near_param.ocl)
@@ -1871,14 +1897,14 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
       current_box = near->context->real_boxes[current_last];
 
       TIMING_START(_t);
+
       find_box(near->context->real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
-      TIMING_STOP_ADD(_t, t[4]);
 
 /*      printf("box: " box_fmt ", start: %" FCS_LMOD_INT "d, size: %" FCS_LMOD_INT "d\n", box_val(current_box), current_start, current_size);*/
 
-      TIMING_START(_t);
       find_neighbours(nreal_neighbours_full, real_neighbours_full, near->context->real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
       if (near->context->ghost_boxes) find_neighbours(nghost_neighbours, ghost_neighbours, near->context->ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
+
       TIMING_STOP_ADD(_t, t[5]);
 
       TIMING_START(_t);
@@ -1954,13 +1980,29 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     }
 #endif /* COMPUTE_VERBOSE */
 
-    fcs_ocl_compute_near_start(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
+    TIMING_SYNC(near->context->comm); TIMING_START(t[7]);
+
+    fcs_ocl_compute_near_prepare(&near->context->ocl, near->context->cutoff, near->context->compute_param, near->compute_param_size,
       near->nparticles, near->positions, near->charges, near->field, near->potentials,
       near->nghosts, near->ghost_positions, near->ghost_charges);
 
+    TIMING_SYNC(near->context->comm); TIMING_STOP(t[7]);
+
+    TIMING_SYNC(near->context->comm); TIMING_START(t[8]);
+
+    fcs_ocl_compute_near_start(&near->context->ocl);
+
 #if !FCS_NEAR_OCL_ASYNC
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials);
+    fcs_ocl_compute_near_join(&near->context->ocl);
+
+    TIMING_SYNC(near->context->comm); TIMING_STOP(t[8]);
+
+    TIMING_SYNC(near->context->comm); TIMING_START(t[9]);
+
+    fcs_ocl_compute_near_release(&near->context->ocl, near->nparticles, near->field, near->potentials);
+
+    TIMING_SYNC(near->context->comm); TIMING_STOP(t[9]);
 
     near->context->ocl.nboxes = 0;
     free(near->context->ocl.box_info);
@@ -2009,7 +2051,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
     free(boxlisttmp);
 
-    near->context->ocl.linkedboxes = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
+    near->context->ocl.linkedboxes = malloc(nrfcs_ocl_compute_near_prepareeal_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
     near->context->ocl.linkedboxesback = malloc(nreal_neighbours * near->context->ocl.nboxes * sizeof(fcs_int));
 
     for (i = 0; i < near->context->ocl.nboxes; i++)
@@ -2128,15 +2170,15 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
       current_box = near->context->real_boxes[current_last];
 
       TIMING_START(_t);
+
       find_box(near->context->real_boxes, near->nparticles, current_box, current_last, &current_start, &current_size);
-      TIMING_STOP_ADD(_t, t[4]);
 
   /*    printf("box: " box_fmt ", start: %" FCS_LMOD_INT "d, size: %" FCS_LMOD_INT "d\n",
         box_val(current_box), current_start, current_size);*/
 
-      TIMING_START(_t);
       find_neighbours(nreal_neighbours, real_neighbours, near->context->real_boxes, near->nparticles, current_box, real_lasts, real_starts, real_sizes);
       if (near->context->ghost_boxes) find_neighbours(nghost_neighbours, ghost_neighbours, near->context->ghost_boxes, near->nghosts, current_box, ghost_lasts, ghost_starts, ghost_sizes);
+
       TIMING_STOP_ADD(_t, t[5]);
 
       TIMING_START(_t);
@@ -2165,7 +2207,7 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
     } while (current_last < near->nparticles);
   }
 
-  TIMING_SYNC(near->context->comm); TIMING_STOP(t[3]);
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[4]);
 
   return 0;
 }
@@ -2173,12 +2215,24 @@ static fcs_int near_compute_main_start(fcs_near_t *near)
 
 static fcs_int near_compute_main_join(fcs_near_t *near)
 {
+#ifdef DO_TIMING
+  double *t = near->context->t;
+#endif
+
 #if FCS_NEAR_OCL
   if (near->near_param.ocl)
   {
 #if FCS_NEAR_OCL_NEW
 
-    fcs_ocl_compute_near_join(&near->context->ocl, near->nparticles, near->field, near->potentials, near->nghosts);
+    fcs_ocl_compute_near_join(&near->context->ocl);
+
+    TIMING_SYNC(near->context->comm); TIMING_STOP(t[8]);
+
+    TIMING_SYNC(near->context->comm); TIMING_START(t[9]);
+
+    fcs_ocl_compute_near_release(&near->context->ocl, near->nparticles, near->field, near->potentials, near->nghosts);
+
+    TIMING_SYNC(near->context->comm); TIMING_STOP(t[9]);
 
     if (near->context->ghost_boxes)
     {
@@ -2224,6 +2278,8 @@ static fcs_int near_compute_main_join(fcs_near_t *near)
 
   free(near->context->real_boxes);
   if (near->context->ghost_boxes) free(near->context->ghost_boxes);
+
+  TIMING_SYNC(near->context->comm); TIMING_STOP(t[3]);
 
   return 0;
 }
@@ -2314,7 +2370,7 @@ static fcs_int near_compute_release(fcs_near_t *near)
 
   TIMING_CMD(
     if (near->context->comm_rank == 0)
-      printf(TIMING_PRINT_PREFIX "fcs_near_compute: %f  %f  %f  %f  %f  %f  %f\n", t[0], t[1], t[2], t[3], t[4], t[5], t[6]);
+      printf(TIMING_PRINT_PREFIX "fcs_near_compute: %f  %f  %f  %f  %f  %f  %f  %f  %f  %f\n", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9]);
   );
 
   free(near->context);
