@@ -140,6 +140,10 @@ void compute_errors(errors_t *e, fcs_int nparticles,
     const fcs_float &ref_potential = reference_potentials[pid];
     const fcs_float &q = charges[pid];
 
+    // compute energy sum
+    if (!isnan(res_potential)) local_sum[idx_energy_sum] += 0.5 * q * res_potential;
+    if (!isnan(ref_potential)) local_sum[idx_ref_energy_sum] += 0.5 * q * ref_potential;
+
     if (isnan(res_potential) || isnan(ref_potential)) continue;
 
     // compute potential and energy sqr sum
@@ -155,10 +159,6 @@ void compute_errors(errors_t *e, fcs_int nparticles,
     fcs_float energy_error = q * potential_error;
     fcs_float energy_error_sqr = energy_error*energy_error;
     local_sum[idx_energy_error_sqr] += energy_error_sqr;
-
-    // compute energy sum
-    local_sum[idx_energy_sum] += 0.5 * q * res_potential;
-    local_sum[idx_ref_energy_sum] += 0.5 * q * ref_potential;
 
     // compute potential error max
     if (potential_error_sqr > local_max[idx_potential_error_sqr].val) {
