@@ -59,7 +59,7 @@ ifcs_p2nfft_compute_near_potential_periodic_erfc(
 {
   fcs_float alpha = *((fcs_float *) param);
   fcs_float adist = alpha * dist;
-  return (1.0 - erf(adist)) / dist; /* use erf instead of erfc to fix ICC performance problems */
+  return (FCS_CONST(1.0) - fcs_erf(adist)) / dist; /* use erf instead of erfc to fix ICC performance problems */
 }
 
 static inline fcs_float
@@ -68,10 +68,10 @@ ifcs_p2nfft_compute_near_field_periodic_erfc(
     )
 {
   fcs_float alpha = *((fcs_float *) param);
-  fcs_float inv_dist = 1.0/dist;
+  fcs_float inv_dist = FCS_CONST(1.0)/dist;
   fcs_float adist = alpha * dist;
-  fcs_float erfc_part_ri = (1.0 - erf(adist)) * inv_dist; /* use erf instead of erfc to fix ICC performance problems */
-  return -(erfc_part_ri + 2.0*alpha*FCS_P2NFFT_1_SQRTPI*exp(-adist*adist)) * inv_dist;
+  fcs_float erfc_part_ri = (FCS_CONST(1.0) - fcs_erf(adist)) * inv_dist; /* use erf instead of erfc to fix ICC performance problems */
+  return -(erfc_part_ri + FCS_CONST(2.0)*alpha*FCS_P2NFFT_1_SQRTPI*fcs_exp(-adist*adist)) * inv_dist;
 }
 
 
@@ -82,11 +82,11 @@ ifcs_p2nfft_compute_near_periodic_erfc(
     )
 {
   fcs_float alpha = *((fcs_float *) param);
-  fcs_float inv_dist = 1.0/dist;
+  fcs_float inv_dist = FCS_CONST(1.0)/dist;
   fcs_float adist = alpha * dist;
-  fcs_float erfc_part_ri = (1.0 - erf(adist)) * inv_dist; /* use erf instead of erfc to fix ICC performance problems */
+  fcs_float erfc_part_ri = (FCS_CONST(1.0) - fcs_erf(adist)) * inv_dist; /* use erf instead of erfc to fix ICC performance problems */
   *p = erfc_part_ri;
-  *f = -(erfc_part_ri + 2.0*alpha*FCS_P2NFFT_1_SQRTPI*exp(-adist*adist)) * inv_dist;
+  *f = -(erfc_part_ri + FCS_CONST(2.0)*alpha*FCS_P2NFFT_1_SQRTPI*fcs_exp(-adist*adist)) * inv_dist;
 }
 
 static inline fcs_float
@@ -97,13 +97,13 @@ ifcs_p2nfft_approx_erfc(
   /* approximate \f$ \exp(d^2) \mathrm{erfc}(d)\f$ by applying formula 7.1.26 from:
      Abramowitz/Stegun: Handbook of Mathematical Functions, Dover (9. ed.), chapter 7.
      Error <= 1.5e-7 */
-  fcs_float t = 1.0 / (1.0 + 0.3275911 * adist);
+  fcs_float t = FCS_CONST(1.0) / (FCS_CONST(1.0) + FCS_CONST(0.3275911) * adist);
   return fcs_exp(-adist*adist) * 
-    (t * (0.254829592 + 
-	  t * (-0.284496736 + 
-	       t * (1.421413741 + 
-		    t * (-1.453152027 + 
-			 t * 1.061405429)))));
+    (t * (FCS_CONST(0.254829592) + 
+          t * (FCS_CONST(-0.284496736) + 
+               t * (FCS_CONST(1.421413741) + 
+                    t * (FCS_CONST(-1.453152027) + 
+                         t * FCS_CONST(1.061405429))))));
 } 
 
 static inline fcs_float
@@ -122,10 +122,10 @@ ifcs_p2nfft_compute_near_field_periodic_approx_erfc(
     )
 {
   fcs_float alpha = *((fcs_float *) param);
-  fcs_float inv_dist = 1.0/dist;
+  fcs_float inv_dist = FCS_CONST(1.0)/dist;
   fcs_float adist = alpha * dist;
   fcs_float erfc_part_ri = ifcs_p2nfft_approx_erfc(adist) *inv_dist;
-  return -(erfc_part_ri + 2.0*alpha*FCS_P2NFFT_1_SQRTPI*exp(-adist*adist)) * inv_dist;
+  return -(erfc_part_ri + FCS_CONST(2.0)*alpha*FCS_P2NFFT_1_SQRTPI*fcs_exp(-adist*adist)) * inv_dist;
 }
 
 static inline void
@@ -135,12 +135,12 @@ ifcs_p2nfft_compute_near_periodic_approx_erfc(
     )
 {
   fcs_float alpha = *((fcs_float *) param);
-  fcs_float inv_dist = 1.0/dist;
+  fcs_float inv_dist = FCS_CONST(1.0)/dist;
   fcs_float adist = alpha * dist;
   fcs_float erfc_part_ri = ifcs_p2nfft_approx_erfc(adist) *inv_dist;
 
   *p = erfc_part_ri;
-  *f = -(erfc_part_ri + 2.0*alpha*FCS_P2NFFT_1_SQRTPI*exp(-adist*adist)) * inv_dist;
+  *f = -(erfc_part_ri + FCS_CONST(2.0)*alpha*FCS_P2NFFT_1_SQRTPI*fcs_exp(-adist*adist)) * inv_dist;
 }
 
 
