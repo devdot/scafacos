@@ -50,6 +50,10 @@
 
 #include "common/fcs-common/FCSCommon.h"
 
+#if HAVE_OPENCL
+#include "common/fcs-opencl/fcs_ocl.h"
+#endif
+
 #include "common/gridsort/gridsort.h"
 
 #include "sl_near_fp.h"
@@ -813,32 +817,7 @@ static fcs_int count_boxes(fcs_int nparticles, box_t *boxes)
 }
 
 
-static const char *fcs_ocl_near_compute_source_head =
-  "#pragma OPENCL EXTENSION cl_khr_fp64: enable\n"
-  "\n"
-#if defined(FCS_FLOAT_IS_FLOAT)
-  "#define fcs_float  float\n"
-  "#define fcs_sqrt(_x_)  sqrtf(_x_)\n"
-#elif defined(FCS_FLOAT_IS_DOUBLE)
-  "#define fcs_float  double\n"
-  "#define fcs_sqrt(_x_)  sqrt(_x_)\n"
-#elif defined(FCS_FLOAT_IS_LONG_DOUBLE)
-  "#define fcs_float  long double\n"
-  "#define fcs_sqrt(_x_)  sqrtl(_x_)\n"
-#else
-# error FCS float data type is unknown
-#endif
-#if defined(FCS_INT_IS_SHORT)
-  "#define fcs_int  short\n"
-#elif defined(FCS_INT_IS_INT)
-  "#define fcs_int  int\n"
-#elif defined(FCS_INT_IS_LONG)
-  "#define fcs_int  long\n"
-#elif defined(FCS_INT_IS_LONG_LONG)
-  "#define fcs_int  long long\n"
-#else
-# error FCS int data type is unknown
-#endif
+static const char *fcs_ocl_near_cl_compute_config =
 #if POTENTIAL_CONST1
   "#define POTENTIAL_CONST1  1\n"
 #else
@@ -871,11 +850,11 @@ static const char *fcs_ocl_near_compute_source_head =
 #endif
   ;
 
-static const char *fcs_ocl_compute_kernel_source_function = "fcs_ocl_near_coulomb_field_potential";
+static const char *fcs_ocl_near_cl_compute_coulomb = "fcs_ocl_near_coulomb_field_potential";
 
-static const char *fcs_ocl_near_compute_source =
+static const char *fcs_ocl_near_cl_compute =
 #include "near.cl_str.h"
-;
+  ;
 
 
 typedef struct
@@ -1080,17 +1059,20 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl_unit
   if (ret != CL_SUCCESS) return 1;
 
   const char *sources[] = {
-    fcs_ocl_near_compute_source_head,
-    "#define _nfp_  ", fcs_ocl_compute_kernel_source_function, "\n",
+    fcs_ocl_cl_config,
+    fcs_ocl_cl,
+    fcs_ocl_math_cl,
+    fcs_ocl_near_cl_compute_config,
+    "#define _nfp_  ", fcs_ocl_near_cl_compute_coulomb, "\n",
     "",
-    fcs_ocl_near_compute_source
+    fcs_ocl_near_cl_compute
   };
   const cl_uint nsources = sizeof(sources) / sizeof(sources[0]);
 
   if (nfp_source && nfp_function)
   {
-    sources[2] = nfp_function;
-    sources[4] = nfp_source;
+    sources[5] = nfp_function;
+    sources[7] = nfp_source;
   }
 
   ocl->program = clCreateProgramWithSource(ocl->context, nsources, sources, NULL, &ret);

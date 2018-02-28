@@ -19,9 +19,9 @@
 AC_PREREQ([2.59])
 define([version_suffix],[])
 AC_INIT([ScaFaCoS], [0.9version_suffix], [scafacos@googlegroups.com], [scafacos],
-	[http://www.scafacos.de])
+  [http://www.scafacos.de])
 m4_ifndef([AC_PACKAGE_URL],
-	  [AC_SUBST([PACKAGE_URL], [http://www.scafacos.de])])
+    [AC_SUBST([PACKAGE_URL], [http://www.scafacos.de])])
 
 AC_MSG_NOTICE([****************************************************************])
 AC_MSG_NOTICE([*      Configuring ScaFaCos main project                       *])
@@ -170,15 +170,15 @@ if test "x$enable_single_lib" = xyes ; then
 fi
 
 if test "x$enable_opencl" = xyes ; then
-	use_fcs_opencl=yes
-	opencl_CFLAGS=
-	opencl_CXXFLAGS=
-	opencl_CPPFLAGS=
-	opencl_LDFLAGS=
-	opencl_LIBS=-lOpenCL
+  use_fcs_opencl=yes
+  opencl_CFLAGS=
+  opencl_CXXFLAGS=
+  opencl_CPPFLAGS=
+  opencl_LDFLAGS=
+  opencl_LIBS=-lOpenCL
 #  AC_DEFINE([FCS_ENABLE_OPENCL], [1], [Whether the OpenCL features are enabled.])
 else
-	use_fcs_opencl=no
+  use_fcs_opencl=no
 fi
 
 # Decide which solvers we want to build.
@@ -253,16 +253,18 @@ fi
 # Check prerequisites.
 
 # Common methods and solvers that use these methods.
-m4_define([all_common_methods], [fftw3 fftw3_mpi pfft pnfft near gridsort resort sl mmm])
+m4_define([all_common_methods], [fftw3 fftw3_mpi pfft pnfft mmm near gridsort resort sl fcs_opencl fcs_common])
 requires_fftw3="p2nfft p3m"
 requires_fftw3_mpi="p2nfft"
 requires_pfft="p2nfft"
 requires_pnfft="p2nfft"
+requires_mmm="mmm1d mmm2d"
 requires_near="direct ewald p2nfft p3m wolf"
 requires_gridsort="ewald memd mmm1d mmm2d p2nfft p3m near"
 requires_resort="gridsort"
 requires_sl="gridsort resort near"
-requires_mmm="mmm1d mmm2d"
+requires_fcs_opencl="p2nfft near"
+requires_fcs_common="all"
 
 AC_FOREACH([prereq], all_common_methods,[
   if test "x$enable_fcs_[]prereq[]" = xyes ; then
@@ -271,7 +273,7 @@ AC_FOREACH([prereq], all_common_methods,[
     use_fcs_[]prereq[]=
     for s in $requires_[]prereq[] ; do
       eval useit=\$use_fcs_$s
-      if test "x$useit" = xyes ; then
+      if test "x$useit" = xyes -o "x$s" = xall ; then
         use_fcs_[]prereq[]=yes
       fi
     done
@@ -755,6 +757,9 @@ if test "x$use_fcs_mmm" = xyes ; then
  AX_FCS_PACKAGE_ADD([mmm_LIBS_A],[lib/common/mmm-common/libfcs_mmm.la])
 fi
 if test "x$use_fcs_opencl" = xyes ; then
+ AX_FCS_PACKAGE_ADD([fcs_opencl_USE],[yes])
+ AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS],[-lfcs_ocl])
+ AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS_A],[lib/common/fcs-opencl/libfcs_ocl.la])
  AX_FCS_PACKAGE_ADD([opencl_USE],[yes])
  AX_FCS_PACKAGE_ADD([opencl_LDADD],[${opencl_LDFLAGS} ${opencl_LIBS}])
 fi
@@ -802,6 +807,7 @@ fi
 AC_CONFIG_FILES([Makefile
   lib/Makefile
   lib/common/fcs-common/Makefile
+  lib/common/fcs-opencl/Makefile
   src/Makefile
   src/fortran/Makefile
   python/Makefile])
@@ -855,9 +861,9 @@ fi
 
 AM_CONDITIONAL(ENABLE_DOC,[test "x$enable_doc" != xno])
 AM_CONDITIONAL(HAVE_LATEX,
-	[test "x$PDFLATEX" != xno && 
-	test "x$MAKEINDEX" != xno && 
-	test "x$BIBTEX" != xno])
+  [test "x$PDFLATEX" != xno && 
+  test "x$MAKEINDEX" != xno && 
+  test "x$BIBTEX" != xno])
 
 if test "x$enable_doc" != xno ; then
   AC_CONFIG_FILES([doc/Makefile doc/latexinc.sh])
@@ -986,5 +992,5 @@ fi
 if AC_FOREACH([solver], all_solver_methods, [test "x$use_fcs_[]solver[]" != xyes && ]) true ; then
   AC_MSG_WARN([no valid solver specified, or missing prerequisites])
   AC_MSG_ERROR([need to specify at least one valid solver.
-		Available solvers are: ]all_solver_methods)
+    Available solvers are: ]all_solver_methods)
 fi

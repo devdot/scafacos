@@ -1,5 +1,9 @@
 # Directories
 SUBDIRS = 
+SUBDIRS += common/fcs-common
+if ENABLE_OPENCL
+SUBDIRS += common/fcs-opencl
+endif
 if ENABLE_COMMON_NEAR
 SUBDIRS += common/near
 endif
@@ -9,7 +13,6 @@ endif
 if ENABLE_COMMON_RESORT
 SUBDIRS += common/resort
 endif
-SUBDIRS += common/fcs-common
 if ENABLE_COMMON_FFTW
 SUBDIRS += common/fftw-3.3
 endif

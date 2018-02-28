@@ -51,7 +51,7 @@ BUILT_SOURCES = nearfield.cl_str.h
 CLEANFILES = nearfield.cl_str.h
 
 nearfield.cl_str.h: $(srcdir)/nearfield.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
-	CPP="$(CPP)" CPPFLAGS="$(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libfcs_p2nfft_la_CPPFLAGS) $(CPPFLAGS)" USE_CPP="yes" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="yes" HEXPAD="16" HEXNULL="yes" \
+	USE_CPP="yes" CPP="$(CPP)" CPPFLAGS="$(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libfcs_p2nfft_la_CPPFLAGS) $(CPPFLAGS)" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="yes" HEXPAD="16" HEXNULL="yes" \
 	$(SHELL) $(top_srcdir)/build-aux/opencl-stringify $< > $@
 endif
 

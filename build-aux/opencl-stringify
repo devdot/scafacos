@@ -9,8 +9,8 @@ SED=${SED:-sed}
 HEXDUMP=${HEXDUMP:-hexdump}
 
 USE_CPP=${USE_CPP:-yes}
-FILTER_TO=${FILTER_TO:-.*}
-FILTER_FROM=${FILTER_FROM:-THIS_SHOULD_NOT_BE_CONTAINED_IN_THE_FILE}
+FILTER_TO=${FILTER_TO:-}
+FILTER_FROM=${FILTER_FROM:-}
 USE_HEX=${USE_HEX:-yes}
 HEXPAD=${HEXPAD:-16}
 HEXNULL=${HEXNULL:-yes}
@@ -26,8 +26,16 @@ for f in ${FILES} ; do
     else
       ${CAT} ${f}
   fi ) | \
-  ${SED} -e "1,/${FILTER_TO}/d" | \
-  ${SED} -e "/${FILTER_FROM}/,\$d" | \
+  ( if [ -n "${FILTER_TO}" ] ; then
+      ${SED} -e "1,/${FILTER_TO}/d"
+    else
+      ${CAT}
+  fi ) | \
+  ( if [ -n "${FILTER_FROM}" ] ; then
+      ${SED} -e "/${FILTER_FROM}/,\$d"
+    else
+      ${CAT}
+  fi ) | \
   ( if [ "${USE_HEX}" = "yes" ] ; then
     ${HEXDUMP} -v -e "${HEXPAD}/1 \"0x%02x, \" \"\\n\"" | \
     ( if [ -n "${HEXPAD}" ] ; then ${SED} -e "s/0x  ,/0x00,/g" ; else ${CAT} ; fi ) | \

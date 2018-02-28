@@ -37,7 +37,7 @@ m4_define([all_features], [opencl])
 m4_define([all_solver_methods], [direct ewald fmm memd mmm1d mmm2d p2nfft p3m pepc pp3mg vmg wolf])
 
 # List of all common methods.
-m4_define([all_common_methods], [near gridsort resort fcs_common mmm pnfft pfft fftw3_mpi_common fftw3_common fftw3_mpi fftw3])
+m4_define([all_common_methods], [near gridsort resort mmm fcs_opencl fcs_common pnfft pfft fftw3_mpi_common fftw3_common fftw3_mpi fftw3])
 
 # Determine enabled solvers.
 AC_ARG_ENABLE([fcs-package-solvers],[],[],[enable_fcs_package_solvers="all_solver_methods"])
