@@ -26,6 +26,9 @@
 /* Whether solver method mmm2d is enabled. */
 #undef FCS_ENABLE_MMM2D
 
+/* Whether the OpenCL features are enabled. */
+#undef FCS_ENABLE_OPENCL
+
 /* Whether solver method p2nfft is enabled. */
 #undef FCS_ENABLE_P2NFFT
 

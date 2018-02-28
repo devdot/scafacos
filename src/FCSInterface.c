@@ -28,14 +28,6 @@
 #include <string.h>
 #include <strings.h>
 
-#if HAVE_OPENCL
-# ifdef __APPLE__
-#  include <OpenCL/opencl.h>
-# else
-#  include <CL/cl.h>
-# endif
-#endif /* HAVE_OPENCL */
-
 #include "FCSCommon.h"
 #include "FCSInterface.h"
 #include "fcs_common.h"
@@ -129,8 +121,9 @@ FCSResult fcs_init(FCS *new_handle, const char* method_name, MPI_Comm communicat
 
   handle->near_field_flag = 1;
 
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   handle->ocl = 0;
+  fcs_ocl_init(&handle->ocl_context);
 #endif
 
 #ifdef FCS_ENABLE_FMM
@@ -258,6 +251,10 @@ FCSResult fcs_destroy(FCS handle)
     result = handle->destroy(handle);
     if (result != FCS_RESULT_SUCCESS) return result;
   }
+
+#if FCS_ENABLE_OPENCL
+  fcs_ocl_destroy(&handle->ocl_context);
+#endif
 
   free(handle);
 
@@ -720,10 +717,10 @@ FCSResult fcs_get_r_cut(FCS handle, fcs_float *r_cut)
 
 FCSResult fcs_set_ocl(FCS handle, fcs_int ocl)
 {
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   handle->ocl = ocl;
   return FCS_RESULT_SUCCESS;
-#endif /* HAVE_OPENCL */
+#endif /* FCS_ENABLE_OPENCL */
 
   return FCS_RESULT_FAILURE;
 }
@@ -731,10 +728,10 @@ FCSResult fcs_set_ocl(FCS handle, fcs_int ocl)
 
 FCSResult fcs_get_ocl(FCS handle, fcs_int *ocl)
 {
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   *ocl = handle->ocl;
   return FCS_RESULT_SUCCESS;
-#endif /* HAVE_OPENCL */
+#endif /* FCS_ENABLE_OPENCL */
 
   return FCS_RESULT_FAILURE;
 }
@@ -836,11 +833,11 @@ FCSResult fcs_print_parameters(FCS handle)
     fcs_get_box_origin(handle)[0], fcs_get_box_origin(handle)[1], fcs_get_box_origin(handle)[2]);
   printf("periodicity: %c %c %c\n", ((fcs_get_periodicity(handle)[0] == 1)?'T':'F'), ((fcs_get_periodicity(handle)[1] == 1)?'T':'F'),((fcs_get_periodicity(handle)[2] == 1)?'T':'F'));
   printf("total particles: %" FCS_LMOD_INT "d\n", fcs_get_total_particles(handle));
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   fcs_int ocl = 0;
   fcs_get_ocl(handle, &ocl);
   printf("ocl: %" FCS_LMOD_INT "d\n", ocl);
-#endif /* HAVE_OPENCL */
+#endif /* FCS_ENABLE_OPENCL */
   printf("solver specific data:\n");
 
   if (handle->print_parameters)
@@ -874,13 +871,9 @@ FCSResult fcs_tune(FCS handle, fcs_int local_particles,
 
   fcs_set_values_changed(handle, 0);
 
-#if HAVE_OPENCL
-  if (handle->ocl)
-  {
-    cl_uint nplatforms;
-    clGetPlatformIDs(0, NULL, &nplatforms);
-  }
-#endif /* HAVE_OPENCL */
+#if FCS_ENABLE_OPENCL
+  if (handle->ocl) fcs_ocl_tune(&handle->ocl_context);
+#endif /* FCS_ENABLE_OPENCL */
 
   if (handle->tune == NULL)
     return fcs_result_create(FCS_ERROR_NOT_IMPLEMENTED, __func__, "Tuning solver method '%s' not implemented", fcs_get_method_name(handle));

@@ -37,6 +37,9 @@
 #include "FCSInterface_p.h"
 #include "FCSResult.h"
 
+#ifdef FCS_ENABLE_OPENCL
+#include "common/fcs-opencl/fcs_ocl.h"
+#endif
 #ifdef FCS_ENABLE_DIRECT
 #include "fcs_direct.h"
 #endif
@@ -157,8 +160,9 @@ typedef struct _FCS_t
      1 = done by library routine*/
   fcs_int near_field_flag;
 
-#if HAVE_OPENCL
+#ifdef FCS_ENABLE_OPENCL
   fcs_int ocl;
+  fcs_ocl_t ocl_context;
 #endif
 
   /* structures containing the method-specific parameters */

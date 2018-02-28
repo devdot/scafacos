@@ -859,98 +859,6 @@ static const char *fcs_ocl_near_cl_compute =
 
 typedef struct
 {
-#define FCS_OCL_UNIT_STR_SIZE  32
-
-  fcs_int platform_index;
-  char platform_suffix[FCS_OCL_UNIT_STR_SIZE];
-
-  char device_type[FCS_OCL_UNIT_STR_SIZE];
-  fcs_int device_index;
-
-} fcs_ocl_unit_t;
-
-
-static fcs_int fcs_ocl_parse_conf(const char *ocl_conf, fcs_int *nunits, fcs_ocl_unit_t *units)
-{
-  char conf[FCS_NEAR_PARAM_OCL_CONF_SIZE];
-  strncpy(conf, ocl_conf, FCS_NEAR_PARAM_OCL_CONF_SIZE);
-
-  const fcs_int max_nunits = *nunits;
-
-  char *next_unit = conf;
-  *nunits = 0;
-  while (next_unit && *nunits < max_nunits)
-  {
-    const char *current_unit = next_unit;
-    next_unit = strchr(current_unit, '/');
-    if (next_unit) { *next_unit = '\0'; ++next_unit; }
-    DEBUG_CMD(printf("ocl current unit: '%s'\n", current_unit););
-
-    char *n = strchr(current_unit, ':');
-    if (n) { *n = '\0'; ++n; }
-    DEBUG_CMD(printf("  platform: '%s'\n", current_unit););
-
-    units[*nunits].platform_suffix[0] = '\0';
-    units[*nunits].platform_index = -1;
-    if (current_unit[0] != '\0')
-    {
-      fcs_int idx;
-      if (sscanf(current_unit, "%" FCS_LMOD_INT "d", &idx) == 1) units[*nunits].platform_index = idx;
-      else strncpy(units[*nunits].platform_suffix, current_unit, FCS_OCL_UNIT_STR_SIZE);
-    }
-
-    fcs_int current_platform = *nunits;
-
-    if (!n)
-    {
-      DEBUG_CMD(printf("  device: ''\n"););
-
-      units[*nunits].device_type[0] = '\0';
-      units[*nunits].device_index = 0;
-
-      ++(*nunits);
-    }
-
-    while (n && *nunits < max_nunits)
-    {
-      const char *c = n;
-      n = strchr(c, ':');
-      if (n) { *n = '\0'; ++n; }
-
-      DEBUG_CMD(printf("  device: '%s'\n", c););
-
-      if (current_platform != *nunits)
-      {
-        units[*nunits].platform_index = units[current_platform].platform_index;
-        strcpy(units[*nunits].platform_suffix, units[current_platform].platform_suffix);
-      }
-
-      char *idx = strchr(c, '[');
-      if (idx) { *idx = '\0'; ++idx; }
-
-      strcpy(units[*nunits].device_type, c);
-
-      if (idx)
-      {
-        if (strcmp(idx, "rank")) units[*nunits].device_index = -1;
-        else units[*nunits].device_index = atoi(idx);
-
-      } else units[*nunits].device_index = 0;
-
-      ++(*nunits);
-    }
-  }
-
-  return 0;
-}
-
-
-typedef struct
-{
-#ifdef DO_INFO
-  fcs_int info;
-#endif
-
   fcs_int nboxes;
   fcs_int *box_info, *real_neighbour_boxes, *ghost_neighbour_boxes;
   fcs_int nreal_neighbour_boxes, nghost_neighbour_boxes;
@@ -971,91 +879,14 @@ typedef struct
 } fcs_ocl_context_t;
 
 
-static cl_device_type device_str2type(const char *device)
+static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl_unit_t *units, const char *nfp_source, const char *nfp_function, int comm_rank)
 {
-  cl_device_type type = CL_DEVICE_TYPE_ALL;
+  cl_device_id device_id;
+  fcs_ocl_get_device(&units[0], comm_rank, &device_id);
 
-  if (strcmp(device, "default") == 0) type = CL_DEVICE_TYPE_DEFAULT;
-  else if (strcmp(device, "cpu") == 0) type = CL_DEVICE_TYPE_CPU;
-  else if (strcmp(device, "gpu") == 0) type = CL_DEVICE_TYPE_GPU;
-  else if (strcmp(device, "accel") == 0) type = CL_DEVICE_TYPE_ACCELERATOR;
-  else if (strcmp(device, "all") == 0) type = CL_DEVICE_TYPE_ALL;
-
-  return type;
-}
-
-
-static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl_unit_t *units, const char *nfp_source, const char *nfp_function, int comm_rank)
-{
   cl_int ret;
 
-  cl_device_id device_id;
-
-#define MAX_NPLATFORMS  8
-  cl_platform_id platform_ids[MAX_NPLATFORMS];
-  cl_uint nplatforms = 0;
-  ret = clGetPlatformIDs(MAX_NPLATFORMS, platform_ids, &nplatforms);
-#undef MAX_NPLATFORMS
-
-  cl_device_type type = device_str2type(units[0].device_type);
-
-  ret = CL_DEVICE_NOT_FOUND;
-  fcs_int p = z_max(0, units[0].platform_index);
-  while (ret != CL_SUCCESS && p < nplatforms)
-  {
-    if (p == units[0].platform_index || units[0].platform_index < 0)
-    {
-#define MAX_NDEVICES  8
-      cl_device_id device_ids[MAX_NDEVICES];
-      cl_uint ndevices = 0;
-      ret = clGetDeviceIDs(platform_ids[p], type, MAX_NDEVICES, device_ids, &ndevices);
-#undef MAX_NDEVICES
-
-      fcs_int d = units[0].device_index;
-
-      if (d < 0)
-      {
-        if (d == -1) d = comm_rank;
-        else d = 0;
-      }
-
-      if (ret == CL_SUCCESS && d < ndevices)
-      {
-        device_id = device_ids[d];
-
-#define MAX_NAME_SIZE  256
-        INFO_CMD(
-          if (ocl->info)
-          {
-            char platform_name[MAX_NAME_SIZE];
-            char device_name[MAX_NAME_SIZE];
-            clGetPlatformInfo(platform_ids[p], CL_PLATFORM_NAME, MAX_NAME_SIZE, platform_name, NULL);
-            clGetDeviceInfo(device_id, CL_DEVICE_NAME, MAX_NAME_SIZE, device_name, NULL);
-
-            printf(INFO_PRINT_PREFIX "  ocl platform index: '%" FCS_LMOD_INT "d'\n", p);
-            printf(INFO_PRINT_PREFIX "  ocl platform name: '%s'\n", platform_name);
-            printf(INFO_PRINT_PREFIX "  ocl device index: '%" FCS_LMOD_INT "d'\n", d);
-            printf(INFO_PRINT_PREFIX "  ocl device name: '%s'\n", device_name);
-          }
-        );
-#undef MAX_NAME_SIZE
-
-      } else
-      {
-        ret = CL_DEVICE_NOT_FOUND;
-        if (p == units[0].platform_index) p = nplatforms;
-      }
-    }
-
-    ++p;
-  }
-
-  if (ret != CL_SUCCESS) return 1;
-
   ocl->context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-  if (ret != CL_SUCCESS) return 1;
-
-  ocl->command_queue = clCreateCommandQueue(ocl->context, device_id, 0, &ret);
   if (ret != CL_SUCCESS) return 1;
 
   const char *sources[] = {
@@ -1091,21 +922,24 @@ static fcs_int fcs_ocl_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl_unit
   ocl->compute_kernel = clCreateKernel(ocl->program, "fcs_ocl_near_compute", &ret);
   if (ret != CL_SUCCESS) return 1;
 
+  ocl->command_queue = clCreateCommandQueue(ocl->context, device_id, 0, &ret);
+  if (ret != CL_SUCCESS) return 1;
+
   return 0;
 }
 
 
-static fcs_int fcs_ocl_release(fcs_ocl_context_t *ocl)
+static fcs_int fcs_ocl_near_release(fcs_ocl_context_t *ocl)
 {
   cl_int ret;
+
+  ret = clReleaseCommandQueue(ocl->command_queue);
+  if (ret != CL_SUCCESS) return 1;
 
   ret = clReleaseKernel(ocl->compute_kernel);
   if (ret != CL_SUCCESS) return 1;
 
   ret = clReleaseProgram(ocl->program);
-  if (ret != CL_SUCCESS) return 1;
-
-  ret = clReleaseCommandQueue(ocl->command_queue);
   if (ret != CL_SUCCESS) return 1;
 
   ret = clReleaseContext(ocl->context);
@@ -1428,11 +1262,7 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
       }
     );
 
-#ifdef DO_INFO
-    near->context->ocl.info = (near->context->comm_rank == 0);
-#endif /* DO_INFO */
-
-    fcs_ocl_init(&near->context->ocl, nunits, units, near->compute_field_potential_source, near->compute_field_potential_function, near->context->comm_rank);
+    fcs_ocl_near_init(&near->context->ocl, nunits, units, near->compute_field_potential_source, near->compute_field_potential_function, near->context->comm_rank);
   }
 #endif /* FCS_NEAR_OCL */
 
@@ -1808,7 +1638,7 @@ static fcs_int near_compute_release(fcs_near_t *near)
 #if FCS_NEAR_OCL
   if (near->near_param.ocl)
   {
-    fcs_ocl_release(&near->context->ocl);
+    fcs_ocl_near_release(&near->context->ocl);
   }
 #endif /* FCS_NEAR_OCL */
 

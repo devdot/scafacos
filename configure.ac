@@ -176,7 +176,7 @@ if test "x$enable_opencl" = xyes ; then
   opencl_CPPFLAGS=
   opencl_LDFLAGS=
   opencl_LIBS=-lOpenCL
-#  AC_DEFINE([FCS_ENABLE_OPENCL], [1], [Whether the OpenCL features are enabled.])
+  AC_DEFINE([FCS_ENABLE_OPENCL], [1], [Whether the OpenCL features are enabled.])
 else
   use_fcs_opencl=no
 fi

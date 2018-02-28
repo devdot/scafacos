@@ -62,9 +62,9 @@ FCSResult fcs_common_print_parameters(FCS handle)
 
 FCSResult fcs_near_set_ocl(fcs_near_param_t *near_param, fcs_int ocl)
 {
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   if (fcs_near_param_set_ocl(near_param, ocl) == 0) return FCS_RESULT_SUCCESS;
-#endif /* HAVE_OPENCL */
+#endif /* FCS_ENABLE_OPENCL */
 
   return FCS_RESULT_FAILURE;
 }
@@ -72,9 +72,9 @@ FCSResult fcs_near_set_ocl(fcs_near_param_t *near_param, fcs_int ocl)
 
 FCSResult fcs_near_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_conf)
 {
-#if HAVE_OPENCL
+#if FCS_ENABLE_OPENCL
   if (fcs_near_param_set_ocl_conf(near_param, ocl_conf) == 0) return FCS_RESULT_SUCCESS;
-#endif /* HAVE_OPENCL */
+#endif /* FCS_ENABLE_OPENCL */
 
   return FCS_RESULT_FAILURE;
 }
