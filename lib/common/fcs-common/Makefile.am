@@ -8,4 +8,6 @@ endif
 libfcs_common_la_CPPFLAGS = -I$(top_srcdir)/src
 
 libfcs_common_la_SOURCES = \
-    FCSCommon.c FCSCommon.h
+    FCSCommon.c FCSCommon.h \
+    fcs_math.h
+

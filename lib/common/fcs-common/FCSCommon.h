@@ -37,41 +37,8 @@ extern "C" {
 #endif
 
 
-/**
- * @brief macros for mathematical functions corresponding to the FCS float data type
- */
-#if defined(FCS_FLOAT_IS_FLOAT)
-# define FCS_MATH(_f_)  _f_##f
-#elif defined(FCS_FLOAT_IS_DOUBLE)
-# define FCS_MATH(_f_)  _f_
-#elif defined(FCS_FLOAT_IS_LONG_DOUBLE)
-# define FCS_MATH(_f_)  _f_##l
-#else
-# error FCS float data type is unknown
-#endif
-
 #include <math.h>
-
-#define fcs_sqrt(_x_)      FCS_MATH(sqrt)(_x_)
-#define fcs_fabs(_x_)      FCS_MATH(fabs)(_x_)
-#define fcs_floor(_x_)     FCS_MATH(floor)(_x_)
-#define fcs_ceil(_x_)      FCS_MATH(ceil)(_x_)
-#define fcs_exp(_x_)       FCS_MATH(exp)(_x_)
-#define fcs_sin(_x_)       FCS_MATH(sin)(_x_)
-#define fcs_cos(_x_)       FCS_MATH(cos)(_x_)
-#define fcs_sinh(_x_)      FCS_MATH(sinh)(_x_)
-#define fcs_cosh(_x_)      FCS_MATH(cosh)(_x_)
-#define fcs_log(_x_)       FCS_MATH(log)(_x_)
-#define fcs_erf(_x_)       FCS_MATH(erf)(_x_)
-#define fcs_erfc(_x_)      FCS_MATH(erfc)(_x_)
-#define fcs_pow(_x_, _y_)  FCS_MATH(pow)(_x_, _y_)
-#define fcs_creal(_x_)     FCS_MATH(creal)(_x_)
-#define fcs_cimag(_x_)     FCS_MATH(cimag)(_x_)
-
-#define fcs_isnan(_x_)     isnan(_x_)
-#define fcs_isinf(_x_)     isinf(_x_)
-
-#define fcs_xabs(_x_)      (((_x_) >= 0)?(_x_):(_x_))
+#include "fcs_math.h"
 
 /**
  * @brief function to determine if two float values are equal

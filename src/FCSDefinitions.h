@@ -30,6 +30,8 @@
 
 #define FCS_ENABLE_DEPRECATED
 
+#undef FCS_CONST
+
 #if defined(FCS_FLOAT_IS_FLOAT)
 # define FCS_CONST(_c_)  _c_ ## F
 #elif defined(FCS_FLOAT_IS_LONG_DOUBLE)
