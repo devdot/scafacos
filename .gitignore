@@ -1,6 +1,7 @@
 nbproject*
 Makefile.in
 configure
+configure.orig
 autom4te.cache
 aclocal.m4
 lt~obsolete.m4
