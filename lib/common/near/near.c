@@ -36,6 +36,7 @@
 
 #define POTENTIAL_CONST1  0
 #define PRINT_PARTICLES   0
+#define PRINT_BOX_STATS   0
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -631,6 +632,67 @@ static void create_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs
   /* sentinel with max. box number */
   boxes[nlocal] = BOX_SET(BOX_MASK, BOX_MASK, BOX_MASK);
 }
+
+
+#if PRINT_BOX_STATS
+
+static void print_box_stats(fcs_int nlocal, fcs_float *positions, fcs_float *box_base, fcs_float *box_a, fcs_float *box_b, fcs_float *box_c, fcs_float cutoff)
+{
+  fcs_float icutoff;
+  fcs_int i, dim_boxes[3], nboxes, *box_stats, b[3];
+
+
+  icutoff = 1.0 / cutoff;
+
+  dim_boxes[0] = (int) ((box_a[0] - box_base[0]) * icutoff) + 1;
+  dim_boxes[1] = (int) ((box_b[1] - box_base[1]) * icutoff) + 1;
+  dim_boxes[2] = (int) ((box_c[2] - box_base[2]) * icutoff) + 1;
+
+  nboxes = dim_boxes[0] * dim_boxes[1] * dim_boxes[2];
+  box_stats = malloc(nboxes * sizeof(fcs_int));
+
+  for (i = 0; i < nboxes; ++i) box_stats[i] = 0;
+
+  for (i = 0; i < nlocal; ++i)
+  {
+    b[0] = (int) ((positions[3 * i + 0] - box_base[0]) * icutoff);
+    b[1] = (int) ((positions[3 * i + 1] - box_base[1]) * icutoff);
+    b[2] = (int) ((positions[3 * i + 2] - box_base[2]) * icutoff);
+
+    b[0] = z_minmax(0, b[0], dim_boxes[0] - 1);
+    b[1] = z_minmax(0, b[1], dim_boxes[1] - 1);
+    b[2] = z_minmax(0, b[2], dim_boxes[2] - 1);
+
+    ++box_stats[(b[2] * dim_boxes[1] + b[1]) * dim_boxes[0] + b[0]];
+  }
+
+  fcs_int nboxes_empty = 0;
+  fcs_int nppb_min = nlocal;
+  fcs_int nppb_max = 0;
+  fcs_float nppb_avg = (fcs_float) nlocal / nboxes;
+  fcs_float nppb_std = 0;
+  for (i = 0; i < nboxes; ++i)
+  {
+    if (box_stats[i] == 0) ++nboxes_empty;
+
+    nppb_min = z_min(box_stats[i], nppb_min);
+    nppb_max = z_max(box_stats[i], nppb_max);
+    nppb_std += (box_stats[i] - nppb_avg) * (box_stats[i] - nppb_avg);
+  }
+  nppb_std = fcs_sqrt(nppb_std / nboxes);
+
+  printf("box statistics:\n");
+  printf("  particles: %" FCS_LMOD_INT "d\n", nlocal);
+  printf("  boxes: %" FCS_LMOD_INT "d x %" FCS_LMOD_INT "d x %" FCS_LMOD_INT "d = %" FCS_LMOD_INT "d\n", dim_boxes[0], dim_boxes[1], dim_boxes[2], nboxes);
+  printf("  empty boxes: %" FCS_LMOD_INT "d = %f%%\n", nboxes_empty, 100.0 * nboxes_empty / nboxes);
+  printf("  particles per box:\n");
+  printf("    minimum: %" FCS_LMOD_INT "d\n", nppb_min);
+  printf("    maximum: %" FCS_LMOD_INT "d\n", nppb_max);
+  printf("    average: %" FCS_LMOD_FLOAT "f\n", nppb_avg);
+  printf("    standard deviation: %" FCS_LMOD_FLOAT "f\n", nppb_std);
+}
+
+#endif
 
 
 static void sort_into_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
@@ -1292,6 +1354,10 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
     printf("ghost:\n");
     print_particles(near->nghosts, near->ghost_positions, near->context->comm_size, near->context->comm_rank, near->context->comm);
   }
+#endif
+
+#if PRINT_BOX_STATS
+  print_box_stats(near->nparticles, near->positions, near->box_base, near->box_a, near->box_b, near->box_c, near->context->cutoff);
 #endif
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
