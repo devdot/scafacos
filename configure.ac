@@ -40,7 +40,7 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 # Print an error if a (custom) AX_ or ACX_ macro appears in the ouput
 m4_pattern_forbid([^A[C]?X_])
 
-# List of all .
+# List of all features.
 m4_define([all_features], [opencl])
 
 # List of all solvers.
@@ -263,7 +263,9 @@ requires_near="direct ewald p2nfft p3m wolf"
 requires_gridsort="ewald memd mmm1d mmm2d p2nfft p3m near"
 requires_resort="gridsort"
 requires_sl="gridsort resort near"
-requires_fcs_opencl="p2nfft near"
+if test "x$enable_opencl" = xyes ; then
+  requires_fcs_opencl="p2nfft near"
+fi
 requires_fcs_common="all"
 
 AC_FOREACH([prereq], all_common_methods,[
@@ -650,6 +652,12 @@ if test "x$use_fcs_mmm" = xyes ; then
 fi
 AM_CONDITIONAL([ENABLE_COMMON_MMM],[test "x$use_fcs_mmm" = xyes])
 
+# Set up fcs-opencl module.
+if test "x$use_fcs_fcs_opencl" = xyes ; then
+  AC_MSG_NOTICE([enabling helper method 'opencl'])
+fi
+AM_CONDITIONAL([ENABLE_COMMON_OPENCL],[test "x$use_fcs_fcs_opencl" = xyes])
+
 # Solver prerequisites.
 
 # direct prerequisites
@@ -688,33 +696,48 @@ enabled_solvers="${enabled_solvers#,}"
 
 ##################################################
 # SUPPORT META-PACKAGE WITH REQUIRED INFORMATION.
-# common methods
 AX_FCS_PACKAGE_RESET
+
+# interface
+AC_CONFIG_FILES([src/Makefile])
 AX_FCS_PACKAGE_ADD([fcs_USE],[yes])
 if test "x$use_fcs_fortran" = xyes ; then
+  AC_CONFIG_FILES([src/fortran/Makefile])
   AX_FCS_PACKAGE_ADD([fcs_LIBS],[-lfcs4fortran])
   AX_FCS_PACKAGE_ADD([fcs_LIBS_A],[src/fortran/libfcs4fortran.la])
 fi
 AX_FCS_PACKAGE_ADD([fcs_LIBS],[-lfcs])
 AX_FCS_PACKAGE_ADD([fcs_LIBS_A],[src/libfcs.la])
+
+# features
+if test "x$use_fcs_opencl" = xyes ; then
+ AX_FCS_PACKAGE_ADD([opencl_USE],[yes])
+ AX_FCS_PACKAGE_ADD([opencl_LDADD],[${opencl_LDFLAGS} ${opencl_LIBS}])
+fi
+
+# common methods
+AC_CONFIG_FILES([lib/common/fcs-common/Makefile])
+AX_FCS_PACKAGE_ADD([fcs_common_USE],[yes])
+AX_FCS_PACKAGE_ADD([fcs_common_LIBS],[-lfcs_common])
+AX_FCS_PACKAGE_ADD([fcs_common_LIBS_A],[lib/common/fcs-common/libfcs_common.la])
 if test "x$use_fcs_near" = xyes ; then
+  AC_CONFIG_FILES([lib/common/near/Makefile])
   AX_FCS_PACKAGE_ADD([near_USE],[yes])
   AX_FCS_PACKAGE_ADD([near_LIBS],[-lfcs_near])
   AX_FCS_PACKAGE_ADD([near_LIBS_A],[lib/common/near/libfcs_near.la])
 fi
 if test "x$use_fcs_gridsort" = xyes ; then
+  AC_CONFIG_FILES([lib/common/gridsort/Makefile])
   AX_FCS_PACKAGE_ADD([gridsort_USE],[yes])
   AX_FCS_PACKAGE_ADD([gridsort_LIBS],[-lfcs_gridsort])
   AX_FCS_PACKAGE_ADD([gridsort_LIBS_A],[lib/common/gridsort/libfcs_gridsort.la])
 fi
 if test "x$use_fcs_resort" = xyes ; then
+  AC_CONFIG_FILES([lib/common/resort/Makefile])
   AX_FCS_PACKAGE_ADD([resort_USE],[yes])
   AX_FCS_PACKAGE_ADD([resort_LIBS],[-lfcs_resort])
   AX_FCS_PACKAGE_ADD([resort_LIBS_A],[lib/common/resort/libfcs_resort.la])
 fi
-AX_FCS_PACKAGE_ADD([fcs_common_USE],[yes])
-AX_FCS_PACKAGE_ADD([fcs_common_LIBS],[-lfcs_common])
-AX_FCS_PACKAGE_ADD([fcs_common_LIBS_A],[lib/common/fcs-common/libfcs_common.la])
 if test "x$use_fcs_pfft_common" = xyes ; then
   AX_FCS_PACKAGE_ADD([pfft_USE],[yes])
   AX_FCS_PACKAGE_ADD([pfft_LIBS],[-lfcs_pfft${fft_precision}])
@@ -752,16 +775,16 @@ if test "x$use_fcs_fftw3_mpi" = xyes ; then
   AX_FCS_PACKAGE_ADD([fftw3_mpi_LDADD],[${fftw3_LDFLAGS} ${fftw3_mpi_LIBS}])
 fi
 if test "x$use_fcs_mmm" = xyes ; then
- AX_FCS_PACKAGE_ADD([mmm_USE],[yes])
- AX_FCS_PACKAGE_ADD([mmm_LIBS],[-lfcs_mmm])
- AX_FCS_PACKAGE_ADD([mmm_LIBS_A],[lib/common/mmm-common/libfcs_mmm.la])
+  AC_CONFIG_FILES([lib/common/mmm-common/Makefile])
+  AX_FCS_PACKAGE_ADD([mmm_USE],[yes])
+  AX_FCS_PACKAGE_ADD([mmm_LIBS],[-lfcs_mmm])
+  AX_FCS_PACKAGE_ADD([mmm_LIBS_A],[lib/common/mmm-common/libfcs_mmm.la])
 fi
-if test "x$use_fcs_opencl" = xyes ; then
- AX_FCS_PACKAGE_ADD([fcs_opencl_USE],[yes])
- AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS],[-lfcs_ocl])
- AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS_A],[lib/common/fcs-opencl/libfcs_ocl.la])
- AX_FCS_PACKAGE_ADD([opencl_USE],[yes])
- AX_FCS_PACKAGE_ADD([opencl_LDADD],[${opencl_LDFLAGS} ${opencl_LIBS}])
+if test "x$use_fcs_fcs_opencl" = xyes ; then
+  AC_CONFIG_FILES([lib/common/fcs-opencl/Makefile])
+  AX_FCS_PACKAGE_ADD([fcs_opencl_USE],[yes])
+  AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS],[-lfcs_ocl])
+  AX_FCS_PACKAGE_ADD([fcs_opencl_LIBS_A],[lib/common/fcs-opencl/libfcs_ocl.la])
 fi
 
 # specific solvers
@@ -806,23 +829,7 @@ fi
 # Create FCS library files.
 AC_CONFIG_FILES([Makefile
   lib/Makefile
-  lib/common/fcs-common/Makefile
-  lib/common/fcs-opencl/Makefile
-  src/Makefile
-  src/fortran/Makefile
   python/Makefile])
-
-# Create near-field module files.
-AC_CONFIG_FILES([lib/common/near/Makefile])
-
-# Create gridsort module files.
-AC_CONFIG_FILES([lib/common/gridsort/Makefile])
-
-# Create resort module files.
-AC_CONFIG_FILES([lib/common/resort/Makefile])
-
-# Create mmm module files.
-AC_CONFIG_FILES([lib/common/mmm-common/Makefile])
 
 # Create test files.
 AC_CONFIG_FILES([

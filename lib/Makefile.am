@@ -1,7 +1,7 @@
 # Directories
 SUBDIRS = 
 SUBDIRS += common/fcs-common
-if ENABLE_OPENCL
+if ENABLE_COMMON_OPENCL
 SUBDIRS += common/fcs-opencl
 endif
 if ENABLE_COMMON_NEAR
