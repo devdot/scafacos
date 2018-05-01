@@ -980,7 +980,10 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   cl_int ret;
 
   ocl->context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-  if (ret != CL_SUCCESS) return 1;
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
+    return 1;
+  }
 
   const char *sources[] = {
     fcs_ocl_cl_config,
