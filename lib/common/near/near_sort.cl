@@ -2,7 +2,6 @@
 
 typedef void HERE_COMES_THE_CODE;
 
- #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
 static void inline ocl_sort_swap_float_triple(int i, int j, fcs_float* array) {
     i = i * 3;
@@ -22,7 +21,9 @@ static void inline ocl_sort_swap_float_triple(int i, int j, fcs_float* array) {
 
 // this kernel will deal with 2 elements,
 //   it has to be called n/2 times in parallel for n elements
-__kernel void bitonic_global_2(__global long long* key, int stage, int dist) {
+__kernel void bitonic_global_2(__global long* key, int stage, int dist) {
+    // long in OpenCL is 64 bits, therefore equal to  C99 long long 
+    
     int k = get_global_id(0);
 
     // calculate the position of our element
@@ -46,7 +47,7 @@ __kernel void bitonic_global_2(__global long long* key, int stage, int dist) {
         keyA = keyA ^ keyB;
 
         // and save keys to global memory
-        data[i] = keyA;
-        data[j] = keyB;
+        key[i] = keyA;
+        key[j] = keyB;
     }
 }

@@ -1188,15 +1188,10 @@ static const char* fcs_ocl_cl_sort =
 #include "near_sort.cl_str.h"
   ;
 
-static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
-{
-  // sort for param boxes
-  // use OpenCL to sort into boxes  
-  printf(INFO_PRINT_PREFIX "  ocl: tschal is here!  %" FCS_LMOD_INT "d\n", nlocal);
-
+static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
   cl_int ret;
 
-  // first build program and kernel
+  // first combine program
   const char* sources[] = {
     fcs_ocl_cl_config,
     fcs_ocl_cl,
@@ -1211,9 +1206,11 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
     return;
   }
 
+  // build the program
   printf(INFO_PRINT_PREFIX "  ocl: building program\n");
   ret = clBuildProgram(ocl->sort_program, 1, &ocl->device_id, NULL, NULL, NULL);
   if (ret != CL_SUCCESS) {
+    // if there are any errors, just print them
     size_t length;
     char buffer[32*1024];
     clGetProgramBuildInfo(ocl->sort_program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
@@ -1221,12 +1218,37 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
     return;
   }
 
+  // finally create the kernel
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
   ocl->compute_kernel = clCreateKernel(ocl->sort_program, "bitonic_global_2", &ret);
   if (ret != CL_SUCCESS) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
   }
+}
+
+static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
+  cl_int ret;
+
+  // destroy our kernel and program
+  ret = clReleaseKernel(ocl->sort_kernel);
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
+    return;
+  }
+
+  ret = clReleaseProgram(ocl->sort_program);
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
+    return;
+  }
+}
+
+static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+{
+  // sort for param boxes
+  // use OpenCL to sort into boxes  
+  printf(INFO_PRINT_PREFIX "  ocl: tschal is here!  %" FCS_LMOD_INT "d\n", nlocal);
 
   printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
   // then initialize memory and write to it
@@ -1288,19 +1310,6 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   clReleaseMemObject(ocl->mem_indices);
   clReleaseMemObject(ocl->mem_field);
   clReleaseMemObject(ocl->mem_potentials);
-
-  // destroy our kernel and program
-  ret = clReleaseKernel(ocl->sort_kernel);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return;
-  }
-
-  ret = clReleaseProgram(ocl->sort_program);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return;
-  }
 }
 #endif
 
@@ -1519,8 +1528,10 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
 #if FCS_NEAR_OCL_SORT
+  fcs_ocl_sort_prepare(&near->context->ocl);
   fcs_ocl_sort_into_boxes(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
   if (near->context->ghost_boxes) fcs_ocl_sort_into_boxes(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+  fcs_ocl_sort_release(&near->context->ocl);
 #else
   sort_into_boxes(near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
   if (near->context->ghost_boxes) sort_into_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
