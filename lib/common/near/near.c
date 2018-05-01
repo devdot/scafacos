@@ -1203,8 +1203,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: creating program\n");
   ocl->sort_program = clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &ret);
-  if (ret != CL_SUCCESS)
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
+  }
 
   printf(INFO_PRINT_PREFIX "  ocl: building program\n");
   ret = clBuildProgram(ocl->sort_program, 1, &ocl->device_id, NULL, NULL, NULL);
@@ -1218,8 +1220,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
   ocl->compute_kernel = clCreateKernel(ocl->program, "bitonic_global_2", &ret);
-  if (ret != CL_SUCCESS)
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
+  }
 
   printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
   // then initialize memory and write to it
@@ -1284,12 +1288,16 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   // destroy our kernel and program
   ret = clReleaseKernel(ocl->sort_kernel);
-  if (ret != CL_SUCCESS)
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
+  }
 
   ret = clReleaseProgram(ocl->sort_program);
-  if (ret != CL_SUCCESS)
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
+  }
 }
 #endif
 
