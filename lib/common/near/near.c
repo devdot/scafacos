@@ -38,6 +38,12 @@
 #define PRINT_PARTICLES   0
 #define PRINT_BOX_STATS   0
 
+#ifdef HAVE_OPENCL
+#define FCS_NEAR_OCL_SORT 1
+#else
+#define FCS_NEAR_OCL_SORT 0
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -695,6 +701,7 @@ static void print_box_stats(fcs_int nlocal, fcs_float *positions, fcs_float *box
 #endif
 
 
+#if FCS_NEAR_OCL_SORT == 0
 static void sort_into_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   fcs_near_fp_elements_t s0, sx0;
@@ -759,6 +766,7 @@ static void sort_into_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, 
     fcs_near____elements_free(&sx3);
   }
 }
+#endif
 
 
 #ifdef BOX_SKIP_FORMAT
@@ -918,6 +926,12 @@ static const char *fcs_ocl_near_cl_compute =
 #include "near.cl_str.h"
   ;
 
+#if FCS_NEAR_OCL_SORT
+
+//static const char *fcs_ocl_near_cl_sort =
+
+#endif
+
 
 typedef struct
 {
@@ -938,6 +952,19 @@ typedef struct
 
   cl_event kernel_completion;
 
+#if FCS_NEAR_OCL_SORT
+  cl_device_id device_id;
+
+  cl_mem mem_boxes;
+  
+  cl_mem mem_indices;
+
+  cl_program sort_program;
+  cl_kernel sort_kernel;  
+
+  cl_event sort_kernel_completion;
+#endif
+
 } fcs_ocl_context_t;
 
 
@@ -945,6 +972,10 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
 {
   cl_device_id device_id;
   fcs_ocl_get_device(&units[0], comm_rank, &device_id);
+
+#if FCS_NEAR_OCL_SORT
+  ocl->device_id = device_id;
+#endif
 
   cl_int ret;
 
@@ -1146,6 +1177,121 @@ static fcs_int fcs_ocl_compute_near_release(fcs_ocl_context_t *ocl, fcs_int npar
 }
 
 #endif /* FCS_NEAR_OCL */
+
+#if FCS_NEAR_OCL_SORT
+
+// built in Makefile.am/.in  like near.cl_str.h
+static const char* fcs_ocl_cl_sort =
+#include "near_sort.cl_str.h"
+  ;
+
+static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+{
+  // sort for param boxes
+  // use OpenCL to sort into boxes  
+  printf(INFO_PRINT_PREFIX "  ocl: tschal is here!  %" FCS_LMOD_INT "d\n", nlocal);
+
+  cl_int ret;
+
+  // first build program and kernel
+  const char* sources[] = {
+    fcs_ocl_cl_config,
+    fcs_ocl_cl,
+    fcs_ocl_math_cl,
+    fcs_ocl_cl_sort
+  };
+
+  printf(INFO_PRINT_PREFIX "  ocl: creating program\n");
+  ocl->sort_program = clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &ret);
+  if (ret != CL_SUCCESS)
+    return;
+
+  printf(INFO_PRINT_PREFIX "  ocl: building program\n");
+  ret = clBuildProgram(ocl->sort_program, 1, &ocl->device_id, NULL, NULL, NULL);
+  if (ret != CL_SUCCESS) {
+    size_t length;
+    char buffer[32*1024];
+    clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    printf("ocl build info: %.*s\n", (int) length, buffer);
+    return;
+  }
+
+  printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
+  ocl->compute_kernel = clCreateKernel(ocl->program, "bitonic_global_2", &ret);
+  if (ret != CL_SUCCESS)
+    return;
+
+  printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
+  // then initialize memory and write to it
+  ocl->mem_boxes      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(boxes), boxes, &_err));
+  // data all read/write for swapping
+  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), positions, &_err));
+  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), charges, &_err));
+  ocl->mem_indices    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_gridsort_index_t), indices, &_err));
+  ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), field, &_err));
+  ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), potentials, &_err));
+
+  printf(INFO_PRINT_PREFIX "  ocl: writing\n");
+
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_indices,    CL_FALSE, 0, nlocal * sizeof(fcs_float), indices, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+
+  printf(INFO_PRINT_PREFIX "  ocl: bitonic\n");
+
+  // set kernel arguments
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 0, sizeof(cl_mem), &ocl->mem_boxes));
+
+  // basically just run the job now
+  size_t global_work_size = nlocal / 2;
+  
+  // do the bitonic sort thing
+  for(unsigned int stage = 1; stage < nlocal; stage *= 2) {
+    // set stage param for kernel
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 1, sizeof(int), (void*)&stage));
+
+    for(unsigned int dist = stage; dist > 0; dist /= 2) {
+      // set kernel argument for dist
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel, 2, sizeof(int), (void*)&dist));
+
+      // and finally run the kernel
+      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+    }
+  }
+  
+  // wait for the sort to finish
+  CL_CHECK(clWaitForEvents(1, &ocl->kernel_completion));
+
+  CL_CHECK(clReleaseEvent(ocl->kernel_completion));
+
+  // read back the results
+  printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
+  // IMPORTANT: Use CL_TRUE on last read for enabling blocking read
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+
+  // now destory our objects
+  clReleaseMemObject(ocl->mem_boxes);
+  // data
+  clReleaseMemObject(ocl->mem_positions);
+  clReleaseMemObject(ocl->mem_charges);
+  clReleaseMemObject(ocl->mem_indices);
+  clReleaseMemObject(ocl->mem_field);
+  clReleaseMemObject(ocl->mem_potentials);
+
+  // destroy our kernel and program
+  ret = clReleaseKernel(ocl->sort_kernel);
+  if (ret != CL_SUCCESS)
+    return;
+
+  ret = clReleaseProgram(ocl->sort_program);
+  if (ret != CL_SUCCESS)
+    return;
+}
+#endif
 
 
 static void compute_near(fcs_float *positions0, fcs_float *charges0, fcs_float *field0, fcs_float *potentials0, fcs_int start0, fcs_int size0,
@@ -1361,8 +1507,13 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 #endif
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
+#if FCS_NEAR_OCL_SORT
+  fcs_ocl_sort_into_boxes(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+  if (near->context->ghost_boxes) fcs_ocl_sort_into_boxes(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+#else
   sort_into_boxes(near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
   if (near->context->ghost_boxes) sort_into_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+#endif
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[2]);
 
 #ifdef BOX_SKIP_FORMAT
