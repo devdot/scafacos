@@ -1220,7 +1220,7 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
 
   // finally create the kernel
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
-  ocl->compute_kernel = clCreateKernel(ocl->sort_program, "bitonic_global_2", &ret);
+  ocl->sort_kernel = clCreateKernel(ocl->sort_program, "bitonic_global_2", &ret);
   if (ret != CL_SUCCESS) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
