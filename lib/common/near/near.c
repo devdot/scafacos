@@ -1216,13 +1216,13 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   if (ret != CL_SUCCESS) {
     size_t length;
     char buffer[32*1024];
-    clGetProgramBuildInfo(ocl->program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
-    printf("ocl build info: %.*s\n", (int) length, buffer);
+    clGetProgramBuildInfo(ocl->sort_program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    printf("ocl build fail %d\nocl build info: %.*s\n", ret, (int) length, buffer);
     return;
   }
 
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
-  ocl->compute_kernel = clCreateKernel(ocl->program, "bitonic_global_2", &ret);
+  ocl->compute_kernel = clCreateKernel(ocl->sort_program, "bitonic_global_2", &ret);
   if (ret != CL_SUCCESS) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;

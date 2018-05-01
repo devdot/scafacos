@@ -2,6 +2,7 @@
 
 typedef void HERE_COMES_THE_CODE;
 
+ #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
 static void inline ocl_sort_swap_float_triple(int i, int j, fcs_float* array) {
     i = i * 3;
@@ -12,7 +13,7 @@ static void inline ocl_sort_swap_float_triple(int i, int j, fcs_float* array) {
 
     array[i] = array[j];
     array[i + 1] = array[j + 1];
-    array[i + 2] = array[j + 2;
+    array[i + 2] = array[j + 2];
 
     array[j] = tmp0;
     array[i + 1] = tmp1;
