@@ -26,7 +26,9 @@
 #elif defined(FCS_FLOAT_IS_DOUBLE)
 # define fcs_float  double
 # if defined(cl_khr_fp64)
-#  pragma OPENCL EXTENSION cl_khr_fp64 : enable
+#  if __OPENCL_VERSION__ <= CL_VERSION_1_1
+#   pragma OPENCL EXTENSION cl_khr_fp64 : enable
+#  endif
 # else
 #  error OpenCL extension cl_khr_fp64 not available
 # endif
