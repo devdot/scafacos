@@ -1260,8 +1260,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), positions, &_err));
   ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), charges, &_err));
   ocl->mem_indices    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_gridsort_index_t), indices, &_err));
-  ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), field, &_err));
-  ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), potentials, &_err));
+  if(field != NULL)
+    ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), field, &_err));
+  if(potentials != NULL)
+    ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), potentials, &_err));
 
   printf(INFO_PRINT_PREFIX "  ocl: writing\n");
 
@@ -1270,8 +1272,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_indices,    CL_FALSE, 0, nlocal * sizeof(fcs_float), indices, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+  if(field != NULL)
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  if(potentials != NULL)
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
   printf(INFO_PRINT_PREFIX "  ocl: bitonic\n");
 
@@ -1313,8 +1317,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   clReleaseMemObject(ocl->mem_positions);
   clReleaseMemObject(ocl->mem_charges);
   clReleaseMemObject(ocl->mem_indices);
-  clReleaseMemObject(ocl->mem_field);
-  clReleaseMemObject(ocl->mem_potentials);
+  if(field != NULL)
+    clReleaseMemObject(ocl->mem_field);
+  if(potentials != NULL)
+    clReleaseMemObject(ocl->mem_potentials);
 }
 #endif
 
