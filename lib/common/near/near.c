@@ -1230,6 +1230,7 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
 static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
   cl_int ret;
 
+  printf(INFO_PRINT_PREFIX "  ocl: releasing ocl sort\n");
   // destroy our kernel and program
   ret = clReleaseKernel(ocl->sort_kernel);
   if (ret != CL_SUCCESS) {
@@ -1242,6 +1243,8 @@ static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
   }
+
+  printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
 }
 
 static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
@@ -1293,15 +1296,17 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   }
   
   // wait for the sort to finish
-  CL_CHECK(clWaitForEvents(1, &ocl->kernel_completion));
+  CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
 
-  CL_CHECK(clReleaseEvent(ocl->kernel_completion));
+  CL_CHECK(clReleaseEvent(ocl->sort_kernel_completion));
 
   // read back the results
   printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
   // IMPORTANT: Use CL_TRUE on last read for enabling blocking read
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
 
+
+  printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
   // now destory our objects
   clReleaseMemObject(ocl->mem_boxes);
   // data
