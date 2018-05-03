@@ -44,6 +44,8 @@
 #define FCS_NEAR_OCL_SORT 0
 #endif
 
+#define FCS_NEAR_OCL_SORT_CHECK 1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -1234,11 +1236,31 @@ static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
   printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
 }
 
+unsigned int next_power_of_2(unsigned int n) {
+  unsigned count = 0;
+
+  // already a power of 2?
+  if (n && !(n & (n - 1)))
+    return n;
+ 
+  while(n != 0) {
+    n  >>= 1;
+    count += 1;
+  }
+ 
+  return 1 << count;
+}
+
 static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param boxes
   // use OpenCL to sort into boxes  
-  printf(INFO_PRINT_PREFIX "  ocl: tschal is here!  %" FCS_LMOD_INT "d\n", nlocal);
+  
+  // first get next power of two for bitonic
+  int n = next_power_of_2(nlocal);
+  int offset = n - nlocal;
+
+  printf(INFO_PRINT_PREFIX "  ocl: tschal is here!  [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", nlocal, n);
 
   printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
   // then initialize memory and write to it
@@ -1254,7 +1276,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: writing\n");
 
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // write zeros to fill up buffer for bitonic
+  const int zero = 0;
+  CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, ocl->mem_boxes, &zero, sizeof(zero), 0, offset * sizeof(box_t), 0, NULL, NULL));
 
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
@@ -1270,10 +1295,10 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   CL_CHECK(clSetKernelArg(ocl->sort_kernel, 0, sizeof(cl_mem), &ocl->mem_boxes));
 
   // basically just run the job now
-  size_t global_work_size = nlocal / 2;
+  size_t global_work_size = n / 2;
   
   // do the bitonic sort thing
-  for(unsigned int stage = 1; stage < nlocal; stage *= 2) {
+  for(unsigned int stage = 1; stage < n; stage *= 2) {
     // set stage param for kernel
     CL_CHECK(clSetKernelArg(ocl->sort_kernel, 1, sizeof(int), (void*)&stage));
 
@@ -1294,7 +1319,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   // read back the results
   printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
   // IMPORTANT: Use CL_TRUE on last read for enabling blocking read
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, offset, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
 
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
@@ -1308,6 +1333,17 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
     CL_CHECK(clReleaseMemObject(ocl->mem_field));
   if(potentials != NULL)
     CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
+
+#if FCS_NEAR_OCL_SORT_CHECK
+  // check the sort results to be correct
+  for(int i = 1; i < nlocal; i++) {
+    if(boxes[i] < boxes[i - 1]) {
+      // we got a fail in sorting
+      printf(INFO_PRINT_PREFIX "  ocl: failed to sort correctly at element #%d, value %lld\n", i, boxes[i]);
+      abort();
+    }
+  }
+#endif
 }
 #endif
 
