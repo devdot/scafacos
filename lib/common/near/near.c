@@ -1200,7 +1200,7 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
   };
 
   printf(INFO_PRINT_PREFIX "  ocl: creating program\n");
-  ocl->sort_program = clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &ret);
+  ocl->sort_program = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
   if (ret != CL_SUCCESS) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
@@ -1213,18 +1213,14 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
     // if there are any errors, just print them
     size_t length;
     char buffer[32*1024];
-    clGetProgramBuildInfo(ocl->sort_program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length);
+    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
     printf("ocl build fail %d\nocl build info: %.*s\n", ret, (int) length, buffer);
     return;
   }
 
   // finally create the kernel
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
-  ocl->sort_kernel = clCreateKernel(ocl->sort_program, "bitonic_global_2", &ret);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return;
-  }
+  ocl->sort_kernel = CL_CHECK_ERR(clCreateKernel(ocl->sort_program, "bitonic_global_2", &_err));
 }
 
 static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
@@ -1232,17 +1228,8 @@ static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing ocl sort\n");
   // destroy our kernel and program
-  ret = clReleaseKernel(ocl->sort_kernel);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return;
-  }
-
-  ret = clReleaseProgram(ocl->sort_program);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return;
-  }
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel));
+  CL_CHECK(clReleaseProgram(ocl->sort_program));
 
   printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
 }
@@ -1312,15 +1299,15 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
   // now destory our objects
-  clReleaseMemObject(ocl->mem_boxes);
+  CL_CHECK(clReleaseMemObject(ocl->mem_boxes));
   // data
-  clReleaseMemObject(ocl->mem_positions);
-  clReleaseMemObject(ocl->mem_charges);
-  clReleaseMemObject(ocl->mem_indices);
+  CL_CHECK(clReleaseMemObject(ocl->mem_positions));
+  CL_CHECK(clReleaseMemObject(ocl->mem_charges));
+  CL_CHECK(clReleaseMemObject(ocl->mem_indices));
   if(field != NULL)
-    clReleaseMemObject(ocl->mem_field);
+    CL_CHECK(clReleaseMemObject(ocl->mem_field));
   if(potentials != NULL)
-    clReleaseMemObject(ocl->mem_potentials);
+    CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
 }
 #endif
 
