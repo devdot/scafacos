@@ -23,13 +23,18 @@ static void inline ocl_sort_swap_float_triple(int i, int j, fcs_float* array) {
 //   it has to be called n/2 times in parallel for n elements
 __kernel void bitonic_global_2(__global long* key, int stage, int dist) {
     // long in OpenCL is 64 bits, therefore equal to  C99 long long 
-    
+
     int k = get_global_id(0);
 
     // calculate the position of our element
     int low = k & (dist - 1);
     int i = (k << 1) - low;
     int j = i + dist;
+
+    // this is not operating on power of two, check for max size
+    int max = get_global_size(0);
+    if(j >= max || i >= max)
+        return; // for now just do a return here, we don't even need to compare anymore.
 
     // calculate the direction of sort
     bool desc = ((i & (stage << 1)) != 0);
