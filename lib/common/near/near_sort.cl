@@ -32,12 +32,12 @@ __kernel void bitonic_global_2(__global long* key, int stage, int dist) {
     int j = i + dist;
 
     // this is not operating on power of two, check for max size
-    int max = get_global_size(0);
-    if(j >= max || i >= max)
+    int max = get_global_size(0) * 2;
+    if(j >= max)
         return; // for now just do a return here, we don't even need to compare anymore.
 
     // calculate the direction of sort
-    bool desc = ((i & (stage << 1)) != 0);
+    bool desc = ((i & (stage << 1)) != 0) ^ (get_global_size(0) < stage);
 
     // load keys
     int keyA = key[i];
