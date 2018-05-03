@@ -1276,7 +1276,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: writing\n");
 
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
   // write zeros to fill up buffer for bitonic
   const int zero = 0;
   CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, ocl->mem_boxes, &zero, sizeof(zero), 0, offset * sizeof(box_t), 0, NULL, NULL));
@@ -1319,7 +1319,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   // read back the results
   printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
   // IMPORTANT: Use CL_TRUE on last read for enabling blocking read
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, offset, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
 
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
