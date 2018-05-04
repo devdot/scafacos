@@ -35,8 +35,8 @@ __kernel void bitonic_global_2(__global long* key, int stage, int dist) {
     bool desc = ((i & (stage << 1)) != 0);
 
     // load keys
-    int keyA = key[i];
-    int keyB = key[j];
+    long keyA = key[i];
+    long keyB = key[j];
 
     // calculate swap and check
     bool swap = (keyA > keyB) ^ desc;

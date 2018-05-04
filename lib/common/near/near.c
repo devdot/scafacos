@@ -1264,7 +1264,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
   // then initialize memory and write to it
-  ocl->mem_boxes      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, n * sizeof(box_t), boxes, &_err));
+  ocl->mem_boxes      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
   // data all read/write for swapping
   ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), positions, &_err));
   ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), charges, &_err));
@@ -1289,6 +1289,8 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   if(potentials != NULL)
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
+  // wait for everything to be finished before continuing to work on the data
+  CL_CHECK(clFinish(ocl->command_queue));
   printf(INFO_PRINT_PREFIX "  ocl: bitonic\n");
 
   // set kernel arguments
@@ -1308,6 +1310,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
       // and finally run the kernel
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
     }
   }
   
