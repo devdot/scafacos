@@ -1266,13 +1266,14 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   // then initialize memory and write to it
   ocl->mem_boxes      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
   // data all read/write for swapping
-  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), positions, &_err));
-  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), charges, &_err));
-  ocl->mem_indices    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_gridsort_index_t), indices, &_err));
+  // we offset this too, can't use CL_MEM_USE_HOST_PTR nor size nlocal nor host_ptr
+  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+  ocl->mem_indices    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_gridsort_index_t), NULL, &_err));
   if(field != NULL)
-    ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * 3 * sizeof(fcs_float), field, &_err));
+    ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
   if(potentials != NULL)
-    ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nlocal * sizeof(fcs_float), potentials, &_err));
+    ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
 
   printf(INFO_PRINT_PREFIX "  ocl: writing\n");
 
@@ -1281,13 +1282,14 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   const int zero = 0;
   CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, ocl->mem_boxes, &zero, sizeof(zero), 0, offset * sizeof(box_t), 0, NULL, NULL));
 
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_indices,    CL_FALSE, 0, nlocal * sizeof(fcs_float), indices, 0, NULL, NULL));
+  // data offsets don't need to be filled with zeros
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_indices,    CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
   if(field != NULL)
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
   if(potentials != NULL)
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
   // wait for everything to be finished before continuing to work on the data
   CL_CHECK(clFinish(ocl->command_queue));
@@ -1295,6 +1297,18 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   // set kernel arguments
   CL_CHECK(clSetKernelArg(ocl->sort_kernel, 0, sizeof(cl_mem), &ocl->mem_boxes));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 3, sizeof(int), (void*)&offset));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 4, sizeof(cl_mem), &ocl->mem_positions));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 5, sizeof(cl_mem), &ocl->mem_charges));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), &ocl->mem_indices));
+  if(field != NULL)
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), &ocl->mem_field));
+  else
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), NULL));
+  if(potentials != NULL)
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), &ocl->mem_positions));
+  else
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), NULL));
 
   // basically just run the job now
   size_t global_work_size = n / 2;
@@ -1321,8 +1335,17 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   // read back the results
   printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
-  // IMPORTANT: Use CL_TRUE on last read for enabling blocking read
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_TRUE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // data
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_positions, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_charges, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_indices, CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+  if(field != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  if(potentials != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+  // wait for all reads to be done
+  CL_CHECK(clFinish(ocl->command_queue));
 
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
