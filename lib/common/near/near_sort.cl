@@ -10,6 +10,7 @@ typedef long fcs_gridsort_index_t;
 static void inline ocl_sort_swap_float_triple(int i, int j, __global fcs_float* array) {
     i = i * 3;
     j = j * 3;
+
     fcs_float tmp0 = array[i];
     fcs_float tmp1 = array[i + 1];
     fcs_float tmp2 = array[i + 2];
@@ -19,8 +20,8 @@ static void inline ocl_sort_swap_float_triple(int i, int j, __global fcs_float* 
     array[i + 2] = array[j + 2];
 
     array[j] = tmp0;
-    array[i + 1] = tmp1;
-    array[i + 2] = tmp2;
+    array[j + 1] = tmp1;
+    array[j + 2] = tmp2;
 }
 
 static void inline ocl_sort_swap_float(int i, int j, __global fcs_float* array) {
@@ -73,7 +74,7 @@ __kernel void bitonic_global_2(__global long* key, const int stage, const int di
         key[j] = keyB;
 
         // now swap the data arrays
-
+        
         ocl_sort_swap_float_triple(i, j, positions);
         ocl_sort_swap_float(i, j, charges);
         ocl_sort_swap_gridsort_index(i, j, indices);

@@ -1306,7 +1306,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   else
     CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), NULL));
   if(potentials != NULL)
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), &ocl->mem_positions));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), &ocl->mem_potentials));
   else
     CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), NULL));
 
@@ -1325,13 +1325,14 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
       // and finally run the kernel
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
+      CL_CHECK(clFinish(ocl->command_queue));
     }
   }
-  
+
   // wait for the sort to finish
   CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
-
   CL_CHECK(clReleaseEvent(ocl->sort_kernel_completion));
+  CL_CHECK(clFinish(ocl->command_queue));
 
   // read back the results
   printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
