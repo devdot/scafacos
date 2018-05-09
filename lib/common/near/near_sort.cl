@@ -38,7 +38,7 @@ static void inline ocl_sort_swap_gridsort_index(int i, int j, __global fcs_grids
 
 // this kernel will deal with 2 elements,
 //   it has to be called n/2 times in parallel for n elements
-__kernel void bitonic_global_2(__global long* key, const int stage, const int dist, const int offset,
+__kernel void bitonic_global_2(__global long* key, const int stage, const int dist,
     __global fcs_float* positions,
     __global fcs_float* charges, 
     __global fcs_gridsort_index_t* indices, 

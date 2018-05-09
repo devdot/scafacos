@@ -1297,18 +1297,17 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
 
   // set kernel arguments
   CL_CHECK(clSetKernelArg(ocl->sort_kernel, 0, sizeof(cl_mem), &ocl->mem_boxes));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 3, sizeof(int), (void*)&offset));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 4, sizeof(cl_mem), &ocl->mem_positions));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 5, sizeof(cl_mem), &ocl->mem_charges));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), &ocl->mem_indices));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 3, sizeof(cl_mem), &ocl->mem_positions));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 4, sizeof(cl_mem), &ocl->mem_charges));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 5, sizeof(cl_mem), &ocl->mem_indices));
   if(field != NULL)
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), &ocl->mem_field));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), &ocl->mem_field));
+  else
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), NULL));
+  if(potentials != NULL)
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), &ocl->mem_potentials));
   else
     CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), NULL));
-  if(potentials != NULL)
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), &ocl->mem_potentials));
-  else
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 8, sizeof(cl_mem), NULL));
 
   // basically just run the job now
   size_t global_work_size = n / 2;
