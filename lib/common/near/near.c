@@ -1252,6 +1252,20 @@ static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
   printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
 }
 
+#ifdef FCS_NEAR_OCL_SORT_CHECK
+static int fcs_ocl_sort_check(fcs_int n, box_t* boxes) {
+  // check the sort results to be correct
+  for(int i = 1; i < n; i++) {
+    if(boxes[i] < boxes[i - 1]) {
+      // we got a fail in sorting
+      printf(INFO_PRINT_PREFIX "  ocl: failed to sort correctly at element #%d, value %lld\n", i, boxes[i]);
+      abort();
+    }
+  }
+  return 1;
+}
+#endif
+
 unsigned int next_power_of_2(unsigned int n) {
   unsigned count = 0;
 
@@ -1267,7 +1281,7 @@ unsigned int next_power_of_2(unsigned int n) {
   return 1 << count;
 }
 
-static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param boxes
   // use OpenCL to sort into boxes  
@@ -1377,14 +1391,7 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
     CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
 
 #if FCS_NEAR_OCL_SORT_CHECK
-  // check the sort results to be correct
-  for(int i = 1; i < nlocal; i++) {
-    if(boxes[i] < boxes[i - 1]) {
-      // we got a fail in sorting
-      printf(INFO_PRINT_PREFIX "  ocl: failed to sort correctly at element #%d, value %lld\n", i, boxes[i]);
-      abort();
-    }
-  }
+  fcs_ocl_sort_check(nlocal, boxes);
 #endif
 }
 #endif
@@ -1607,8 +1614,8 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
   if(near->near_param.ocl)
   {
     fcs_ocl_sort_prepare(&near->context->ocl);
-    fcs_ocl_sort_into_boxes(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-    if (near->context->ghost_boxes) fcs_ocl_sort_into_boxes(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+    fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+    if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
     fcs_ocl_sort_release(&near->context->ocl);
   }
   else
