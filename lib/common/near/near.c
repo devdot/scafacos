@@ -703,7 +703,6 @@ static void print_box_stats(fcs_int nlocal, fcs_float *positions, fcs_float *box
 #endif
 
 
-#if FCS_NEAR_OCL_SORT == 0
 static void sort_into_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   fcs_near_fp_elements_t s0, sx0;
@@ -768,7 +767,6 @@ static void sort_into_boxes(fcs_int nlocal, box_t *boxes, fcs_float *positions, 
     fcs_near____elements_free(&sx3);
   }
 }
-#endif
 
 
 #ifdef BOX_SKIP_FORMAT
@@ -1588,13 +1586,18 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
 #if FCS_NEAR_OCL_SORT
-  fcs_ocl_sort_prepare(&near->context->ocl);
-  fcs_ocl_sort_into_boxes(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-  if (near->context->ghost_boxes) fcs_ocl_sort_into_boxes(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-  fcs_ocl_sort_release(&near->context->ocl);
-#else
-  sort_into_boxes(near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-  if (near->context->ghost_boxes) sort_into_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+  if(near->near_param.ocl)
+  {
+    fcs_ocl_sort_prepare(&near->context->ocl);
+    fcs_ocl_sort_into_boxes(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+    if (near->context->ghost_boxes) fcs_ocl_sort_into_boxes(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+    fcs_ocl_sort_release(&near->context->ocl);
+  }
+  else
+  {
+    sort_into_boxes(near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+    if (near->context->ghost_boxes) sort_into_boxes(near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+  }
 #endif
   TIMING_SYNC(near->context->comm); TIMING_STOP(t[2]);
 
