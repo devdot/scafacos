@@ -947,6 +947,10 @@ static const char *fcs_ocl_cl_sort_config =
 static const char* fcs_ocl_cl_sort =
 #include "near_sort.cl_str.h"
   ;
+
+static const char* fcs_ocl_cl_sort_bitonic = 
+#include "near_sort_bitonic.cl_str.h"
+  ;
 #endif
 
 
@@ -976,8 +980,8 @@ typedef struct
   
   cl_mem mem_indices;
 
-  cl_program sort_program;
-  cl_kernel sort_kernel;  
+  cl_program sort_program_bitonic;
+  cl_kernel sort_kernel_bitonic_global_2;  
 
   cl_event sort_kernel_completion;
 #endif
@@ -1209,11 +1213,12 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
     fcs_ocl_cl,
     fcs_ocl_math_cl,
     fcs_ocl_cl_sort_config,
-    fcs_ocl_cl_sort
+    fcs_ocl_cl_sort,
+    fcs_ocl_cl_sort_bitonic
   };
 
   printf(INFO_PRINT_PREFIX "  ocl: creating program\n");
-  ocl->sort_program = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
+  ocl->sort_program_bitonic = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
   if (ret != CL_SUCCESS) {
     printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
     return;
@@ -1221,19 +1226,19 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
 
   // build the program
   printf(INFO_PRINT_PREFIX "  ocl: building program\n");
-  ret = clBuildProgram(ocl->sort_program, 1, &ocl->device_id, NULL, NULL, NULL);
+  ret = clBuildProgram(ocl->sort_program_bitonic, 1, &ocl->device_id, NULL, NULL, NULL);
   if (ret != CL_SUCCESS) {
     // if there are any errors, just print them
     size_t length;
     char buffer[32*1024];
-    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
+    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program_bitonic, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
     printf("ocl build fail %d\nocl build info: %.*s\n", ret, (int) length, buffer);
     return;
   }
 
   // finally create the kernel
   printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
-  ocl->sort_kernel = CL_CHECK_ERR(clCreateKernel(ocl->sort_program, "bitonic_global_2", &_err));
+  ocl->sort_kernel_bitonic_global_2 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_bitonic, "bitonic_global_2", &_err));
 }
 
 static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
@@ -1241,8 +1246,8 @@ static void fcs_ocl_sort_release(fcs_ocl_context_t *ocl) {
 
   printf(INFO_PRINT_PREFIX "  ocl: releasing ocl sort\n");
   // destroy our kernel and program
-  CL_CHECK(clReleaseKernel(ocl->sort_kernel));
-  CL_CHECK(clReleaseProgram(ocl->sort_program));
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_2));
+  CL_CHECK(clReleaseProgram(ocl->sort_program_bitonic));
 
   printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
 }
@@ -1307,18 +1312,18 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   printf(INFO_PRINT_PREFIX "  ocl: bitonic\n");
 
   // set kernel arguments
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 0, sizeof(cl_mem), &ocl->mem_boxes));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 3, sizeof(cl_mem), &ocl->mem_positions));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 4, sizeof(cl_mem), &ocl->mem_charges));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel, 5, sizeof(cl_mem), &ocl->mem_indices));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &ocl->mem_boxes));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &ocl->mem_positions));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 4, sizeof(cl_mem), &ocl->mem_charges));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 5, sizeof(cl_mem), &ocl->mem_indices));
   if(field != NULL)
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), &ocl->mem_field));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), &ocl->mem_field));
   else
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 6, sizeof(cl_mem), NULL));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), NULL));
   if(potentials != NULL)
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), &ocl->mem_potentials));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), &ocl->mem_potentials));
   else
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 7, sizeof(cl_mem), NULL));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), NULL));
 
   // basically just run the job now
   size_t global_work_size = n / 2;
@@ -1326,14 +1331,14 @@ static void fcs_ocl_sort_into_boxes(fcs_ocl_context_t *ocl, fcs_int nlocal, box_
   // do the bitonic sort thing
   for(unsigned int stage = 1; stage < n; stage *= 2) {
     // set stage param for kernel
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel, 1, sizeof(int), (void*)&stage));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
 
     for(unsigned int dist = stage; dist > 0; dist /= 2) {
       // set kernel argument for dist
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel, 2, sizeof(int), (void*)&dist));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
 
       // and finally run the kernel
-      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
       CL_CHECK(clFinish(ocl->command_queue));
     }

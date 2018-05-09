@@ -5,80 +5,44 @@ typedef void HERE_COMES_THE_CODE;
 
 #define NULL 0
 
-static void inline ocl_sort_swap_float_triple(int i, int j, __global fcs_float* array) {
-    i = i * 3;
-    j = j * 3;
+// swap keys (long) using XOR
+#define swap_keys(a, b) { a = a ^ b; b = a ^ b; a = a ^ b; }
 
-    fcs_float tmp0 = array[i];
-    fcs_float tmp1 = array[i + 1];
-    fcs_float tmp2 = array[i + 2];
+// generic swap
+#define swap_data(a, b) { typeof(a) tmp = a; a = b; b = tmp; }
 
-    array[i] = array[j];
-    array[i + 1] = array[j + 1];
-    array[i + 2] = array[j + 2];
+// generic swap on global array
+#define swap_data_global(i, j, array) { swap_data(array[i], array[j]); }
 
-    array[j] = tmp0;
-    array[j + 1] = tmp1;
-    array[j + 2] = tmp2;
+static void inline swap_data_float_triple_global(int i, int j, __global fcs_float* array) {
+    int k = i * 3;
+    int l = j * 3;
+
+    fcs_float tmp0 = array[k];
+    fcs_float tmp1 = array[k + 1];
+    fcs_float tmp2 = array[k + 2];
+
+    array[k] = array[l];
+    array[++k] = array[l + 1];
+    array[++k] = array[l + 2];
+
+    array[l] = tmp0;
+    array[++l] = tmp1;
+    array[++l] = tmp2;
 }
 
-static void inline ocl_sort_swap_float(int i, int j, __global fcs_float* array) {
-    fcs_float tmp = array[i];
-    array[i] = array[j];
-    array[j] = tmp;
-}
-
-static void inline ocl_sort_swap_gridsort_index(int i, int j, __global fcs_gridsort_index_t* array) {
-    fcs_gridsort_index_t tmp = array[i];
-    array[i] = array[j];
-    array[j] = tmp;
-}
-
-// this kernel will deal with 2 elements,
-//   it has to be called n/2 times in parallel for n elements
-__kernel void bitonic_global_2(__global key_t* key, const int stage, const int dist,
+static void inline swap_data_all_global(int i, int j,
     __global fcs_float* positions,
     __global fcs_float* charges, 
     __global fcs_gridsort_index_t* indices, 
     __global fcs_float* field, 
     __global fcs_float* potentials)
 {
-    // long in OpenCL is 64 bits, therefore equal to  C99 long long 
-
-    int k = get_global_id(0);
-
-    // calculate the position of our element
-    int low = k & (dist - 1);
-    int i = (k << 1) - low;
-    int j = i + dist;
-
-    // calculate the direction of sort
-    bool desc = ((i & (stage << 1)) != 0);
-
-    // load keys
-    key_t keyA = key[i];
-    key_t keyB = key[j];
-
-    // calculate swap and check
-    bool swap = (keyA > keyB) ^ desc;
-    if(swap) {
-        // now swap the keys around using XOR
-        keyA = keyA ^ keyB;
-        keyB = keyA ^ keyB;
-        keyA = keyA ^ keyB;
-
-        // and save keys to global memory
-        key[i] = keyA;
-        key[j] = keyB;
-
-        // now swap the data arrays
-        
-        ocl_sort_swap_float_triple(i, j, positions);
-        ocl_sort_swap_float(i, j, charges);
-        ocl_sort_swap_gridsort_index(i, j, indices);
-        if(field != NULL)
-            ocl_sort_swap_float_triple(i, j, field);
-        if(potentials != NULL)
-            ocl_sort_swap_float(i, j, potentials);
-    }
+    swap_data_float_triple_global(i, j, positions);
+    swap_data_global(i, j, charges);
+    swap_data_global(i, j, indices);
+    if(field != NULL)
+        swap_data_float_triple_global(i, j, field);
+    if(potentials != NULL)
+        swap_data_global(i, j, potentials);
 }
