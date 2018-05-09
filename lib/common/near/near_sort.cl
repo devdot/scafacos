@@ -2,8 +2,6 @@
 
 typedef void HERE_COMES_THE_CODE;
 
-// OpenCL long is equal to C99 long long
-typedef long fcs_gridsort_index_t;
 
 #define NULL 0
 
@@ -38,7 +36,7 @@ static void inline ocl_sort_swap_gridsort_index(int i, int j, __global fcs_grids
 
 // this kernel will deal with 2 elements,
 //   it has to be called n/2 times in parallel for n elements
-__kernel void bitonic_global_2(__global long* key, const int stage, const int dist,
+__kernel void bitonic_global_2(__global key_t* key, const int stage, const int dist,
     __global fcs_float* positions,
     __global fcs_float* charges, 
     __global fcs_gridsort_index_t* indices, 
@@ -58,8 +56,8 @@ __kernel void bitonic_global_2(__global long* key, const int stage, const int di
     bool desc = ((i & (stage << 1)) != 0);
 
     // load keys
-    long keyA = key[i];
-    long keyB = key[j];
+    key_t keyA = key[i];
+    key_t keyB = key[j];
 
     // calculate swap and check
     bool swap = (keyA > keyB) ^ desc;

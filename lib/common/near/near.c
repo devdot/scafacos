@@ -27,6 +27,7 @@
 #define FCS_NEAR_ASYNC            1
 #define FCS_NEAR_OCL_ASYNC        1
 #define FCS_NEAR_OCL_WAIT_WRITE   0
+#define FCS_NEAR_BOX_IS_LONG_LONG 1
 
 #define COMPUTE                   1
 #define COMPUTE_BOX               1
@@ -158,8 +159,11 @@ do {                                                                        \
 #define TIMING_STOP(_t_)           TIMING_CMD(((_t_) = MPI_Wtime() - (_t_));)
 #define TIMING_STOP_ADD(_t_, _r_)  TIMING_CMD(((_r_) += MPI_Wtime() - (_t_));)
 
-
-typedef long long box_t;
+#ifdef FCS_NEAR_BOX_IS_LONG_LONG
+  typedef long long box_t;
+#else
+# error Type for box_t not available
+#endif
 
 #define BOX_BITS                         21
 #define BOX_CONST(_b_)                   (_b_##LL)
@@ -928,8 +932,21 @@ static const char *fcs_ocl_near_cl_compute =
 
 #if FCS_NEAR_OCL_SORT
 
-//static const char *fcs_ocl_near_cl_sort =
+static const char *fcs_ocl_cl_sort_config =
 
+  // OpenCL long is equal to C99 long long
+  "typedef long fcs_gridsort_index_t;\n"
+#if FCS_NEAR_BOX_IS_LONG_LONG
+  "typedef long key_t;\n"
+#else
+# error Type for box_t not available
+#endif
+  ;
+
+// built in Makefile.am/.in  like near.cl_str.h
+static const char* fcs_ocl_cl_sort =
+#include "near_sort.cl_str.h"
+  ;
 #endif
 
 
@@ -1183,11 +1200,6 @@ static fcs_int fcs_ocl_compute_near_release(fcs_ocl_context_t *ocl, fcs_int npar
 
 #if FCS_NEAR_OCL_SORT
 
-// built in Makefile.am/.in  like near.cl_str.h
-static const char* fcs_ocl_cl_sort =
-#include "near_sort.cl_str.h"
-  ;
-
 static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
   cl_int ret;
 
@@ -1196,6 +1208,7 @@ static void fcs_ocl_sort_prepare(fcs_ocl_context_t *ocl) {
     fcs_ocl_cl_config,
     fcs_ocl_cl,
     fcs_ocl_math_cl,
+    fcs_ocl_cl_sort_config,
     fcs_ocl_cl_sort
   };
 
