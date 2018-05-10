@@ -48,8 +48,8 @@
 #define FCS_NEAR_OCL_SORT_CHECK 1
 
 // configuration for radix sort
-#define FCS_NEAR_OCL_SORT_RADIX       2
-#define FCS_NEAR_OCL_SORT_RADIX_BITS  1
+#define FCS_NEAR_OCL_SORT_RADIX       4
+#define FCS_NEAR_OCL_SORT_RADIX_BITS  2
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1440,7 +1440,7 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
   if (ret != CL_SUCCESS) {
     size_t length;
     char buffer[32*1024];
-    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program_bitonic, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
+    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program_radix, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
     printf("ocl failed to build radix program %d\nocl build info: %.*s\n", ret, (int) length, buffer);
     return;
   }
@@ -1461,28 +1461,44 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
   CL_CHECK(clReleaseProgram(ocl->sort_program_radix));
 }
 
+#define max(a, b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
 static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
-  printf(INFO_PRINT_PREFIX "  ocl: Sort %d elements with radixsort\n", nlocal);
-  
-  int n = nlocal;
+  // todo: make them auto-scale
+  #define LOCAL_SIZE 128
+  #define SCAN_SIZE 128 // in elements, not work-items
+  int n = (nlocal % LOCAL_SIZE == 0)? n : nlocal + LOCAL_SIZE - (nlocal % LOCAL_SIZE);
+  int offset = n - nlocal;
 
   // calculate work sizes
-  #define ITEMS 64
   const size_t global_size_histogram  = n;
-  const size_t local_size_histogram   = ITEMS;
-  const size_t group_num_histogram    = global_size_histogram / local_size_histogram;
+  const size_t local_size_histogram   = LOCAL_SIZE;
 
-  const size_t global_size_scan   = FCS_NEAR_OCL_SORT_RADIX_BITS * n / 2;
-  const size_t local_size_scan    = global_size_scan / group_num_histogram;
-  const size_t global_size_scan2  = group_num_histogram / 2;
+  const size_t global_size_scan   = FCS_NEAR_OCL_SORT_RADIX * n / 2;
+  const size_t local_size_scan    = SCAN_SIZE / 2;
+
+  const size_t scan2_groups_real  = FCS_NEAR_OCL_SORT_RADIX * n / SCAN_SIZE;
+  const size_t scan2_groups       = next_power_of_2(scan2_groups_real);
+  const size_t scan_buffer_size   = max(scan2_groups_real, SCAN_SIZE);
+
+  const size_t global_size_scan2  = scan2_groups / 2;
   const size_t local_size_scan2   = global_size_scan2;
 
-  const size_t global_size_histogram_paste = FCS_NEAR_OCL_SORT_RADIX_BITS * n / 2;
-  const size_t local_size_histogram_paste  = n / group_num_histogram;
+  const size_t global_size_histogram_paste = FCS_NEAR_OCL_SORT_RADIX * n / 2;
+  const size_t local_size_histogram_paste  = SCAN_SIZE / 2;
 
   const size_t global_size_reorder = n;
-  const size_t local_size_reorder  = n / group_num_histogram;
+  const size_t local_size_reorder  = LOCAL_SIZE;
+
+  printf(INFO_PRINT_PREFIX "  ocl: Sort %d => %d elements with radixsort\n", nlocal, n);
+  printf(INFO_PRINT_PREFIX "  ocl: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
+  printf(INFO_PRINT_PREFIX "  ocl: %d groups, %d elements each\n", n / LOCAL_SIZE, LOCAL_SIZE);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan: %d groups, %d elements each\n", global_size_scan / local_size_scan, SCAN_SIZE);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan2: %d => %d elements \n", scan2_groups_real, scan2_groups);
 
   // create buffers
   cl_mem mem_keys       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
@@ -1492,12 +1508,16 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
   cl_mem mem_data_swap  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(int), NULL, &_err));
 
   cl_mem mem_histograms = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE,  sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * n, NULL, &_err));
-  cl_mem mem_histograms_sum = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sizeof(int) * group_num_histogram, NULL, &_err));
-  cl_mem mem_histograms_sum_tmp = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sizeof(int) * group_num_histogram, NULL, &_err));
+  cl_mem mem_histograms_sum = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sizeof(int) * scan2_groups, NULL, &_err));
+  cl_mem mem_histograms_sum_tmp = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sizeof(int) * scan2_groups, NULL, &_err));
 
 
   // write keys to buffer
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_keys, CL_TRUE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_keys, CL_TRUE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // fill up the front with zeros
+  const int zero = 0;
+  CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(box_t), 0, NULL, NULL));
+
 
   // set kernel arguments
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 1, sizeof(cl_mem), &mem_histograms));
@@ -1505,19 +1525,20 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 2, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * local_size_histogram, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 4, sizeof(int), &n));
 
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 1, sizeof(int) * n * FCS_NEAR_OCL_SORT_RADIX, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 1, sizeof(int) * scan_buffer_size, NULL));
 
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram_paste, 0, sizeof(cl_mem), &mem_histograms));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram_paste, 1, sizeof(cl_mem), &mem_histograms_sum));
 
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 4, sizeof(cl_mem), &mem_histograms));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * ITEMS, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * LOCAL_SIZE, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(int), &n));
 
   // calculate the amount of passes from the datatype of boxes
   int pass_max = (sizeof(box_t) * 8) / FCS_NEAR_OCL_SORT_RADIX_BITS;
   // and start the main loop of radix sort
-  for(int pass = 0; pass < pass_max; pass += FCS_NEAR_OCL_SORT_RADIX_BITS) {
+  printf(INFO_PRINT_PREFIX "  ocl: start radix sort\n");
+  for(int pass = 0; pass < pass_max; pass++) {
     // 1. histogram
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 0, sizeof(cl_mem), &mem_keys));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 3, sizeof(int), &pass));
@@ -1563,7 +1584,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
   }
 
   // read back the buffers
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_FALSE, 0, nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
   
   CL_CHECK(clFinish(ocl->command_queue));
 
@@ -1795,10 +1816,16 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 #if FCS_NEAR_OCL_SORT
   if(near->near_param.ocl)
   {
+    /*
     fcs_ocl_sort_bitonic_prepare(&near->context->ocl);
     fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
     if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
     fcs_ocl_sort_bitonic_release(&near->context->ocl);
+    */
+    fcs_ocl_sort_radix_prepare(&near->context->ocl);
+    fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+    if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+    fcs_ocl_sort_radix_release(&near->context->ocl);
   }
   else
   {

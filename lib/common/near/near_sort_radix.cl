@@ -3,11 +3,11 @@
 typedef void HERE_COMES_THE_CODE;
 
 #if RADIX_BITS < 8
-    typedef char shortkey_t
+    typedef char shortkey_t;
 #elif RADIX_BITS < 16
-    typedef short shortkey_t
+    typedef short shortkey_t;
 #else
-    typedef int shortkey_t
+    typedef int shortkey_t;
 #endif
 typedef int histogram_t;
 
@@ -71,7 +71,7 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
 
     // load into local buffer
     buffer[2 * local_id] = histograms[2 * global_id];
-    buffer[2 * local_id + 1] = historgrams[2 * global_id + 1];
+    buffer[2 * local_id + 1] = histograms[2 * global_id + 1];
 
     // run prefix sum
     int decale = 1; // ???
@@ -111,8 +111,8 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
     barrier(CLK_LOCAL_MEM_FENCE);
 
     // now push that back to global
-    histogram[2 * global_id] = buffer[2 * local_id];
-    histogram[2 * global_id + 1] = buffer[2 * local_id + 1];
+    histograms[2 * global_id] = buffer[2 * local_id];
+    histograms[2 * global_id + 1] = buffer[2 * local_id + 1];
 }
 
 __kernel void radix_histogram_paste(__global histogram_t* histograms, __global histogram_t* sum) {
@@ -152,10 +152,10 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         index = i + offset;
 
         key = keysIn[index];
-
+        
         // get the shortkey again
         shortkey = ((key >> (pass * RADIX_BITS)) & (RADIX - 1));
-
+        
         // calculate the index for the out array
         indexOut = local_histograms[shortkey * local_workitems + local_id];
 
