@@ -46,3 +46,55 @@ static void inline swap_data_all_global(int i, int j,
     if(potentials != NULL)
         swap_data_global(i, j, potentials);
 }
+
+// one work-item per memory item
+__kernel void move_data_float(__global const index_t* data, const int offset,
+    __global const fcs_float* in,
+    __global fcs_float* out)
+{
+    // first apply offset to data index array
+    data += offset;
+    
+    // get our index
+    index_t indexOut  = get_global_id(0);
+    index_t indexIn = data[indexOut] - offset;
+
+    // and now just write in to out
+    out[indexOut] = in[indexIn];
+}
+
+// one work-item per memory item
+__kernel void move_data_float_triple(__global const index_t* data, const int offset,
+    __global const fcs_float* in,
+    __global fcs_float* out)
+{
+    // first apply offset to data index array
+    data += offset;
+    // get our index
+    index_t indexOut  = get_global_id(0);
+    index_t indexIn = data[indexOut] - offset;
+
+    // adjust for triple
+    indexIn *= 3;
+    indexOut *= 3;
+
+    // and now just write in to out
+    out[indexOut] = in[indexIn];
+    out[++indexOut] = in[++indexIn];
+    out[++indexOut] = in[++indexIn];
+}
+
+// one work-item per memory item
+__kernel void move_data_gridsort_index(__global const index_t* data, const int offset,
+    __global const fcs_gridsort_index_t* in,
+    __global fcs_gridsort_index_t* out)
+{
+    // first apply offset to data index array
+    data += offset;
+    // get our index
+    index_t indexOut  = get_global_id(0);
+    index_t indexIn = data[indexOut] - offset;
+
+    // and now just write in to out
+    out[indexOut] = in[indexIn];
+}

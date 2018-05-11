@@ -1009,6 +1009,10 @@ typedef struct
   cl_kernel sort_kernel_radix_scan;
   cl_kernel sort_kernel_radix_reorder;
 
+  cl_kernel sort_kernel_move_data_float;
+  cl_kernel sort_kernel_move_data_float_triple;
+  cl_kernel sort_kernel_move_data_gridsort_index;
+
   cl_event sort_kernel_completion;
 #endif
 
@@ -1446,10 +1450,14 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
   }
 
   // build all the kernels
-  ocl->sort_kernel_radix_histogram        = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_histogram", &_err));
-  ocl->sort_kernel_radix_histogram_paste  = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_histogram_paste", &_err));
-  ocl->sort_kernel_radix_scan             = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_scan", &_err));
-  ocl->sort_kernel_radix_reorder          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_reorder", &_err));
+  ocl->sort_kernel_radix_histogram          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_histogram", &_err));
+  ocl->sort_kernel_radix_histogram_paste    = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_histogram_paste", &_err));
+  ocl->sort_kernel_radix_scan               = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_scan", &_err));
+  ocl->sort_kernel_radix_reorder            = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_reorder", &_err));
+
+  ocl->sort_kernel_move_data_float          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_float", &_err));
+  ocl->sort_kernel_move_data_float_triple   = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_float_triple", &_err));
+  ocl->sort_kernel_move_data_gridsort_index = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_gridsort_index", &_err));
 }
 
 static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
@@ -1457,6 +1465,10 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
   CL_CHECK(clReleaseKernel(ocl->sort_kernel_radix_histogram_paste));
   CL_CHECK(clReleaseKernel(ocl->sort_kernel_radix_scan));
   CL_CHECK(clReleaseKernel(ocl->sort_kernel_radix_reorder));
+
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_float));
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_float_triple));
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_gridsort_index));
 
   CL_CHECK(clReleaseProgram(ocl->sort_program_radix));
 }
@@ -1493,6 +1505,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
   const size_t global_size_reorder = n;
   const size_t local_size_reorder  = LOCAL_SIZE;
+
+  const size_t global_size_move_data = nlocal;
 
   printf(INFO_PRINT_PREFIX "  ocl: Sort %d => %d elements with radixsort\n", nlocal, n);
   printf(INFO_PRINT_PREFIX "  ocl: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
@@ -1583,14 +1597,108 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
     mem_data_swap = mem_tmp;
   }
 
-  // read back the buffers
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
-  
+  printf(INFO_PRINT_PREFIX "  ocl: move data\n");
+
+  // release unneeded buffers
+  CL_CHECK(clReleaseMemObject(mem_keys_swap));
+  CL_CHECK(clReleaseMemObject(mem_data_swap));
+  CL_CHECK(clReleaseMemObject(mem_histograms));
+  CL_CHECK(clReleaseMemObject(mem_histograms_sum));
+  CL_CHECK(clReleaseMemObject(mem_histograms_sum_tmp));
+
+  // make new buffers for data
+  cl_mem mem_positionsIn  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
+  cl_mem mem_positionsOut = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
+  cl_mem mem_chargesIn    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_float), NULL, &_err));
+  cl_mem mem_chargesOut   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_float), NULL, &_err));
+  cl_mem mem_indicesIn   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_gridsort_index_t), NULL, &_err));
+  cl_mem mem_indicesOut  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_gridsort_index_t), NULL, &_err));
+  cl_mem mem_fieldIn = NULL, mem_fieldOut = NULL;
+  if(field != NULL) {
+    mem_fieldIn   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
+    mem_fieldOut  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
+  }
+  cl_mem mem_potentialsIn = NULL, mem_potentialsOut = NULL;
+  if(potentials != NULL) {
+    mem_potentialsIn  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_float), NULL, &_err));
+    mem_potentialsOut = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_float), NULL, &_err));
+  }
+
+  // write in buffers
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_positionsIn,  CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_chargesIn,    CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_indicesIn,    CL_FALSE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+  if(field != NULL)
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_fieldIn,      CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  if(potentials != NULL)
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_potentialsIn, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+
   CL_CHECK(clFinish(ocl->command_queue));
 
-  // destroy our buffers
+  // now move the data arrays around
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 0, sizeof(cl_mem), &mem_data));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 1, sizeof(int), &offset));
+
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 2, sizeof(cl_mem), &mem_chargesIn));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 3, sizeof(cl_mem), &mem_chargesOut));
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  if(potentials != NULL) {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 2, sizeof(cl_mem), &mem_potentialsIn));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 3, sizeof(cl_mem), &mem_potentialsOut));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  }
+  // triples
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 0, sizeof(cl_mem), &mem_data));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 1, sizeof(int), &offset));
+
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 2, sizeof(cl_mem), &mem_positionsIn));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 3, sizeof(cl_mem), &mem_positionsOut));
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float_triple, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  if(field != NULL) {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 2, sizeof(cl_mem), &mem_fieldIn));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 3, sizeof(cl_mem), &mem_fieldOut));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float_triple, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  }
+  // gridsort_index
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 0, sizeof(cl_mem), &mem_data));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 1, sizeof(int), &offset));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 2, sizeof(cl_mem), &mem_indicesIn));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 3, sizeof(cl_mem), &mem_indicesOut));
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_gridsort_index, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  
+  // let the all finish the movement
+  CL_CHECK(clFinish(ocl->command_queue));
+
+  // read back the buffers
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // data
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positionsOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_chargesOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_indicesOut, CL_FALSE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+  if(field != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_fieldOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  if(potentials != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_potentialsOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+
+  CL_CHECK(clFinish(ocl->command_queue));
+
+  // destroy remaining buffers
   CL_CHECK(clReleaseMemObject(mem_keys));
-  CL_CHECK(clReleaseMemObject(mem_keys_swap));
+  CL_CHECK(clReleaseMemObject(mem_data));
+  CL_CHECK(clReleaseMemObject(mem_positionsIn));
+  CL_CHECK(clReleaseMemObject(mem_positionsOut));
+  CL_CHECK(clReleaseMemObject(mem_chargesIn));
+  CL_CHECK(clReleaseMemObject(mem_chargesOut));
+  CL_CHECK(clReleaseMemObject(mem_indicesIn));
+  CL_CHECK(clReleaseMemObject(mem_indicesOut));
+  if(field != NULL) {
+    CL_CHECK(clReleaseMemObject(mem_fieldIn));
+    CL_CHECK(clReleaseMemObject(mem_fieldOut));
+  }
+  if(potentials != NULL) {
+    CL_CHECK(clReleaseMemObject(mem_potentialsIn));
+    CL_CHECK(clReleaseMemObject(mem_potentialsOut));
+  }
 
 #if FCS_NEAR_OCL_SORT_CHECK
   fcs_ocl_sort_check(nlocal, boxes);
@@ -1822,6 +1930,7 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
     if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
     fcs_ocl_sort_bitonic_release(&near->context->ocl);
     */
+   
     fcs_ocl_sort_radix_prepare(&near->context->ocl);
     fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
     if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
