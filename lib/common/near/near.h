@@ -38,6 +38,10 @@ extern "C" {
 # undef FCS_NEAR_OCL
 #endif
 
+#if HAVE_OPENCL
+#include "near_sort.h"
+#endif
+
 typedef fcs_float (*fcs_near_field_f)(const void *param, fcs_float dist);
 typedef fcs_float (*fcs_near_potential_f)(const void *param, fcs_float dist);
 typedef void (*fcs_near_field_potential_f)(const void *param, fcs_float dist, fcs_float *f, fcs_float *p);
@@ -66,6 +70,11 @@ typedef struct _fcs_near_param_t
 #define FCS_NEAR_PARAM_OCL_CONF_SIZE  256
   char ocl_conf[FCS_NEAR_PARAM_OCL_CONF_SIZE];
 #endif /* FCS_NEAR_OCL */
+
+#if FCS_NEAR_OCL_SORT
+  fcs_int ocl_sort;
+  fcs_int ocl_sort_algo;
+#endif /* FCS_NEAR_OCL_SORT */
 
 } fcs_near_param_t;
 
@@ -130,6 +139,8 @@ fcs_int fcs_near_param_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
   <device> = default|cpu|gpu|accel|custom|all[<device_index>]
 */
 fcs_int fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl);
+fcs_int fcs_near_param_set_ocl_sort(fcs_near_param_t *near_param, fcs_int ocl_sort);
+fcs_int fcs_near_param_set_ocl_sort_algo(fcs_near_param_t *near_param, fcs_int ocl_sort_algo);
 #endif /* HAVE_OPENCL */
 
 

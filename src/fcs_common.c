@@ -79,6 +79,23 @@ FCSResult fcs_near_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_co
   return FCS_RESULT_FAILURE;
 }
 
+FCSResult fcs_near_set_ocl_sort(fcs_near_param_t *near_param, fcs_int ocl_sort)
+{
+#if FCS_ENABLE_OPENCL
+  if (fcs_near_param_set_ocl_sort(near_param, ocl_sort) == 0) return FCS_RESULT_SUCCESS;
+#endif /* FCS_ENABLE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
+
+FCSResult fcs_near_set_ocl_sort_algo(fcs_near_param_t *near_param, fcs_int ocl_sort_algo)
+{
+#if FCS_ENABLE_OPENCL
+  if (fcs_near_param_set_ocl_sort_algo(near_param, ocl_sort_algo) == 0) return FCS_RESULT_SUCCESS;
+#endif /* FCS_ENABLE_OPENCL */
+
+  return FCS_RESULT_FAILURE;
+}
 
 FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched)
 {
@@ -91,8 +108,10 @@ FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue
 
 #define handle  near_param
 
-  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl",      near_set_ocl,      FCS_PARSE_VAL(fcs_int));
-  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_conf", near_set_ocl_conf, FCS_PARSE_VAL(fcs_p_char_t));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl",           near_set_ocl,           FCS_PARSE_VAL(fcs_int));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_conf",      near_set_ocl_conf,      FCS_PARSE_VAL(fcs_p_char_t));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_sort",      near_set_ocl_sort,      FCS_PARSE_VAL(fcs_int));
+  FCS_PARSE_IF_PARAM_THEN_FUNC1_GOTO_NEXT("near_ocl_sort_algo", near_set_ocl_sort_algo, FCS_PARSE_VAL(fcs_int));
 
 #undef handle
 

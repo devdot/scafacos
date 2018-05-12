@@ -330,6 +330,10 @@ void fcs_near_param_create(fcs_near_param_t *near_param)
   near_param->ocl = 0;
   near_param->ocl_conf[0] = '\0';
 #endif /* FCS_NEAR_OCL */
+#if FCS_NEAR_OCL_SORT
+  near_param->ocl_sort = 0;
+  near_param->ocl_sort_algo = 0;
+#endif /* FCS_NEAR_OCL_SORT */
 }
 
 
@@ -368,6 +372,29 @@ fcs_int fcs_near_param_set_ocl_conf(fcs_near_param_t *near_param, const char *oc
 #else /* FCS_NEAR_OCL */
   return 1;
 #endif /* FCS_NEAR_OCL */
+}
+
+
+fcs_int fcs_near_param_set_ocl_sort(fcs_near_param_t *near_param, fcs_int ocl_sort)
+{
+#if FCS_NEAR_OCL_SORT
+  near_param->ocl_sort = ocl_sort;
+
+  return 0;
+#else /* FCS_NEAR_OCL_SORT */
+  return 1;
+#endif /* FCS_NEAR_OCL_SORT */
+}
+
+fcs_int fcs_near_param_set_ocl_sort_algo(fcs_near_param_t *near_param, fcs_int ocl_sort_algo)
+{
+#if FCS_NEAR_OCL_SORT
+  near_param->ocl_sort_algo = ocl_sort_algo;
+
+  return 0;
+#else /* FCS_NEAR_OCL_SORT */
+  return 1;
+#endif /* FCS_NEAR_OCL_SORT */
 }
 
 #endif /* HAVE_OPENCL */
@@ -1847,12 +1874,16 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 #if FCS_NEAR_OCL
       printf(INFO_PRINT_PREFIX "  ocl: %" FCS_LMOD_INT "d\n", near->near_param.ocl);
       printf(INFO_PRINT_PREFIX "  ocl_conf: '%s'\n", near->near_param.ocl_conf);
-#endif /* FCS_NEAR_OCL */
+#endif  /* FCS_NEAR_OCL */
+#if FCS_NEAR_OCL_SORT
+      printf(INFO_PRINT_PREFIX "  ocl_sort: %" FCS_LMOD_INT "d\n", near->near_param.ocl_sort);
+      printf(INFO_PRINT_PREFIX "  ocl_sort_algo: %" FCS_LMOD_INT "d\n", near->near_param.ocl_sort_algo);
+#endif /* FCS_NEAR_OCL_SORT */
     }
   );
 
 #if FCS_NEAR_OCL
-  if (near->near_param.ocl)
+  if (near->near_param.ocl || near->near_param.ocl_sort)
   {
 #define MAX_UNITS  4
     fcs_int nunits = MAX_UNITS;
@@ -1911,19 +1942,26 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
 
   TIMING_SYNC(near->context->comm); TIMING_START(t[2]);
 #if FCS_NEAR_OCL_SORT
-  if(near->near_param.ocl)
+  if(near->near_param.ocl_sort)
   {
-    /*
-    fcs_ocl_sort_bitonic_prepare(&near->context->ocl);
-    fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-    if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-    fcs_ocl_sort_bitonic_release(&near->context->ocl);
-    */
-   
-    fcs_ocl_sort_radix_prepare(&near->context->ocl);
-    fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-    if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-    fcs_ocl_sort_radix_release(&near->context->ocl);
+    switch(near->near_param.ocl_sort_algo)
+    {
+      case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
+        fcs_ocl_sort_bitonic_prepare(&near->context->ocl);
+        fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+        if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        fcs_ocl_sort_bitonic_release(&near->context->ocl);
+        break;
+      case FCS_NEAR_OCL_SORT_ALGO_RADIX:
+        fcs_ocl_sort_radix_prepare(&near->context->ocl);
+        fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+        if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        fcs_ocl_sort_radix_release(&near->context->ocl);
+        break;
+      default:
+        printf("ocl_sort_algo = %d is unknown!\n", near->near_param.ocl_sort_algo);
+        abort();
+    }
   }
   else
   {
@@ -2270,7 +2308,7 @@ static fcs_int near_compute_release(fcs_near_t *near)
 #endif
 
 #if FCS_NEAR_OCL
-  if (near->near_param.ocl)
+  if (near->near_param.ocl || near->near_param.ocl_sort)
   {
     fcs_ocl_near_release(&near->context->ocl);
   }

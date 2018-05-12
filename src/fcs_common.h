@@ -38,6 +38,8 @@ FCSResult fcs_common_print_parameters(FCS handle);
 
 FCSResult fcs_near_set_ocl(fcs_near_param_t *near_param, fcs_int ocl);
 FCSResult fcs_near_set_ocl_conf(fcs_near_param_t *near_param, const char *ocl_conf);
+FCSResult fcs_near_set_ocl_sort(fcs_near_param_t *near_param, fcs_int ocl_sort);
+FCSResult fcs_near_set_ocl_sort_algo(fcs_near_param_t *near_param, fcs_int ocl_sort_algo);
 FCSResult fcs_near_set_parameter(fcs_near_param_t *near_param, fcs_bool continue_on_errors, char **current, char **next, fcs_int *matched);
 FCSResult fcs_near_print_parameters(fcs_near_param_t *near_param);
 
