@@ -1490,8 +1490,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
   printf(INFO_PRINT_PREFIX "  ocl: Sort %d => %d elements with radixsort\n", nlocal, n);
   printf(INFO_PRINT_PREFIX "  ocl: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
   printf(INFO_PRINT_PREFIX "  ocl: %d groups, %d elements each\n", n / LOCAL_SIZE, LOCAL_SIZE);
-  printf(INFO_PRINT_PREFIX "  ocl: Scan: %d groups, %d elements each\n", global_size_scan / local_size_scan, SCAN_SIZE);
-  printf(INFO_PRINT_PREFIX "  ocl: Scan2: %d => %d elements \n", scan2_groups_real, scan2_groups);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan: %ld groups, %d elements each\n", global_size_scan / local_size_scan, SCAN_SIZE);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan2: %ld => %ld elements \n", scan2_groups_real, scan2_groups);
 
   // create buffers
   cl_mem mem_keys       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
