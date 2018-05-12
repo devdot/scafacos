@@ -39,18 +39,6 @@
 #define PRINT_PARTICLES   0
 #define PRINT_BOX_STATS   0
 
-#ifdef HAVE_OPENCL
-#define FCS_NEAR_OCL_SORT 1
-#else
-#define FCS_NEAR_OCL_SORT 0
-#endif
-
-#define FCS_NEAR_OCL_SORT_CHECK 1
-
-// configuration for radix sort
-#define FCS_NEAR_OCL_SORT_RADIX       4
-#define FCS_NEAR_OCL_SORT_RADIX_BITS  2
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -77,6 +65,10 @@
 
 #include "z_tools.h"
 #include "near.h"
+
+#if HAVE_OPENCL
+#include "near_sort.h"
+#endif
 
 
 #if FCS_NEAR_OCL
@@ -936,9 +928,6 @@ static const char *fcs_ocl_near_cl_compute =
 
 #if FCS_NEAR_OCL_SORT
 
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
-
 static const char *fcs_ocl_cl_sort_config =
 
   // OpenCL long is equal to C99 long long
@@ -967,9 +956,6 @@ static const char* fcs_ocl_cl_sort_bitonic =
 static const char* fcs_ocl_cl_sort_radix =
 #include "near_sort_radix.cl_str.h"
   ;
-
-#undef STR_HELPER
-#undef STR
 
 #endif // FCS_NEAR_OCL_SORT
 
@@ -1031,10 +1017,7 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   cl_int ret;
 
   ocl->context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
-    return 1;
-  }
+  if (ret != CL_SUCCESS) return 1;
 
   const char *sources[] = {
     fcs_ocl_cl_config,
@@ -1473,10 +1456,6 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
   CL_CHECK(clReleaseProgram(ocl->sort_program_radix));
 }
 
-#define max(a, b) \
-   ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a > _b ? _a : _b; })
 
 static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
