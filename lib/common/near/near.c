@@ -1667,17 +1667,17 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
   printf(INFO_PRINT_PREFIX "  ocl: Sort %d => %d elements with radixsort\n", nlocal, n);
   printf(INFO_PRINT_PREFIX "  ocl: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
-  printf(INFO_PRINT_PREFIX "  ocl: %d groups, %d elements each\n", n / local_size, local_size);
-  printf(INFO_PRINT_PREFIX "  ocl: Scan: %ld groups, %d elements each\n", global_size_scan / local_size_scan, scan_size);
+  printf(INFO_PRINT_PREFIX "  ocl: %ld groups, %ld elements each\n", n / local_size, local_size);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan: %ld groups, %ld elements each\n", global_size_scan / local_size_scan, scan_size);
   printf(INFO_PRINT_PREFIX "  ocl: Scan2: %ld => %ld elements \n", scan2_groups_real, scan2_groups);
 
   if(local_size_scan > FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
-    printf("local size for scan %d exceeds maximum size %d\n", local_size_scan, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
+    printf("local size for scan %ld exceeds maximum size %d\n", local_size_scan, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
     abort();
   }
 
   if(local_size_scan2 > FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
-    printf("local size for scan2 %d exceeds maximum size %d\n", local_size_scan2, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
+    printf("local size for scan2 %ld exceeds maximum size %d\n", local_size_scan2, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
     abort();
   }
 
