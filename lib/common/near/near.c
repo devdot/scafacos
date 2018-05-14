@@ -980,6 +980,10 @@ static const char* fcs_ocl_cl_sort_bitonic =
 #include "near_sort_bitonic.cl_str.h"
   ;
 
+static const char* fcs_ocl_cl_sort_hybrid = 
+#include "near_sort_hybrid.cl_str.h"
+  ;
+
 static const char* fcs_ocl_cl_sort_radix =
 #include "near_sort_radix.cl_str.h"
   ;
@@ -1009,6 +1013,8 @@ typedef struct
 #if FCS_NEAR_OCL_SORT
   cl_device_id device_id;
 
+  cl_ulong local_memory;
+
   cl_mem mem_boxes;
   cl_mem mem_data;
   
@@ -1016,6 +1022,9 @@ typedef struct
 
   cl_program sort_program_bitonic;
   cl_kernel sort_kernel_bitonic_global_2; 
+
+  cl_program sort_program_hybrid;
+  cl_kernel sort_kernel_bitonic_local;
 
   cl_program sort_program_radix;
   cl_kernel sort_kernel_radix_histogram;
@@ -1040,6 +1049,9 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
 
 #if FCS_NEAR_OCL_SORT
   ocl->device_id = device_id;
+
+  // query local memory size
+  clGetDeviceInfo(device_id, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(ocl->local_memory), &ocl->local_memory, NULL);
 #endif
 
   cl_int ret;
@@ -1789,6 +1801,282 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 #endif
 }
 
+static void fcs_ocl_sort_hybrid_prepare(fcs_ocl_context_t *ocl, int use_index) {
+  cl_int ret;
+
+  const char* hybrid_use_index = "-D HYBRID_USE_INDEX=1 -D BITONIC_USE_INDEX=1";
+
+  // first combine program
+  const char* sources[] = {
+    fcs_ocl_cl_config,
+    fcs_ocl_cl,
+    fcs_ocl_math_cl,
+    fcs_ocl_cl_sort_config,
+    fcs_ocl_cl_sort,
+    fcs_ocl_cl_sort_bitonic,
+    fcs_ocl_cl_sort_hybrid
+  };
+
+  printf(INFO_PRINT_PREFIX "  ocl: creating program\n");
+  ocl->sort_program_hybrid = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
+  if (ret != CL_SUCCESS) {
+    printf(INFO_PRINT_PREFIX " ocl: exited with code %d\n", ret);
+    return;
+  }
+
+  // build the program
+  printf(INFO_PRINT_PREFIX "  ocl: building program\n");
+  if(use_index)
+    ret = clBuildProgram(ocl->sort_program_hybrid, 1, &ocl->device_id, hybrid_use_index, NULL, NULL);
+  else
+    ret = clBuildProgram(ocl->sort_program_hybrid, 1, &ocl->device_id, NULL, NULL, NULL);
+  if (ret != CL_SUCCESS) {
+    // if there are any errors, just print them
+    size_t length;
+    char buffer[32*1024];
+    CL_CHECK(clGetProgramBuildInfo(ocl->sort_program_hybrid, ocl->device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &length));
+    printf("ocl build fail %d\nocl build info: %.*s\n", ret, (int) length, buffer);
+    return;
+  }
+
+  // finally create the kernel
+  printf(INFO_PRINT_PREFIX "  ocl: creating kernel\n");
+  ocl->sort_kernel_bitonic_local    = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_2", &_err));
+  ocl->sort_kernel_bitonic_global_2 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_2", &_err));
+
+  if(use_index) {
+    // create additional kernels
+    ocl->sort_kernel_move_data_float          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "move_data_float", &_err));
+    ocl->sort_kernel_move_data_float_triple   = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "move_data_float_triple", &_err));
+    ocl->sort_kernel_move_data_gridsort_index = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "move_data_gridsort_index", &_err));
+  }
+}
+
+static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl, int use_index) {
+  cl_int ret;
+
+  printf(INFO_PRINT_PREFIX "  ocl: releasing ocl sort\n");
+  // destroy our kernel and program
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_local));
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_2));
+  CL_CHECK(clReleaseProgram(ocl->sort_program_hybrid));
+  if(use_index) {
+    // let the move kernels go
+    CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_float));
+    CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_float_triple));
+    CL_CHECK(clReleaseKernel(ocl->sort_kernel_move_data_gridsort_index));
+  }
+
+  printf(INFO_PRINT_PREFIX "  ocl: done releasing\n");
+}
+
+
+static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, int use_index, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+{
+  // bitonic sort only works for n as real power of 2
+  int n = fcs_ocl_helper_next_power_of_2(nlocal);
+  int offset = n - nlocal;
+
+  // calculate parameters
+  size_t global_size_local = n;
+  size_t local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+  const size_t bytesPerElement = sizeof(box_t) + sizeof(int);
+  int quota = ocl->local_memory / (local_size_local * bytesPerElement);
+
+  while (n / 2 < local_size_local && local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
+    // we need to adjust and make smaller groups
+    local_size_local /= 2;
+  }
+
+  // check if the planned size was not met
+  if(quota == 0) {
+    quota = 1;
+    local_size_local = fcs_ocl_helper_next_power_of_2((ocl->local_memory / bytesPerElement) / 2);
+  }
+
+  int workgroupElementsNum = quota * local_size_local;
+
+  size_t global_size_global = n/2;
+
+  printf(INFO_PRINT_PREFIX "  ocl: bitonic hybrid (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", use_index, nlocal, n);
+  printf(INFO_PRINT_PREFIX "  ocl: %ld groups, %d elements each (quota %d)\n", global_size_local / local_size_local, workgroupElementsNum, quota);
+  printf(INFO_PRINT_PREFIX "  ocl: local memory: %ld of %ld bytes\n", bytesPerElement * workgroupElementsNum, ocl->local_memory);
+
+  printf(INFO_PRINT_PREFIX "  ocl: initializing buffers\n");
+  // then initialize memory and write to it
+  ocl->mem_boxes      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
+  // data all read/write for swapping
+  if(use_index) {
+    ocl->mem_data = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(int), NULL, &_err));
+  }
+  else {
+    // we offset this too, can't use CL_MEM_USE_HOST_PTR nor size nlocal nor host_ptr
+    ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+    ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+    ocl->mem_indices    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_gridsort_index_t), NULL, &_err));
+    if(field != NULL)
+      ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+    if(potentials != NULL)
+      ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+  }
+
+  printf(INFO_PRINT_PREFIX "  ocl: writing\n");
+
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // write zeros to fill up buffer
+  const int zero = 0;
+  CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, ocl->mem_boxes, &zero, sizeof(zero), 0, offset * sizeof(box_t), 0, NULL, NULL));
+
+  if(!use_index) {
+    // data offsets don't need to be filled with zeros
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_indices,    CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+    if(field != NULL)
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    if(potentials != NULL)
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+  }
+
+  // wait for everything to be finished before continuing to work on the data
+  CL_CHECK(clFinish(ocl->command_queue));
+  printf(INFO_PRINT_PREFIX "  ocl: bitonic\n");
+
+  // set kernel arguments for bitonic local
+  int stage = 1;
+  int sortOnGlobal = 1; // true
+  int sortOnGlobalFactor = 1;
+  int desc = 0;
+  int startStage = 1;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &ocl->mem_boxes));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupElementsNum * sizeof(box_t), NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+   if(use_index) {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &ocl->mem_data));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 8, workgroupElementsNum * sizeof(int), NULL));
+  }
+  else {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &ocl->mem_positions));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 8, sizeof(cl_mem), &ocl->mem_charges));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 9, sizeof(cl_mem), &ocl->mem_indices));
+    if(field != NULL)
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 10, sizeof(cl_mem), &ocl->mem_field));
+    else
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 10, sizeof(cl_mem), NULL));
+    if(potentials != NULL)
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 11, sizeof(cl_mem), &ocl->mem_potentials));
+    else
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 11, sizeof(cl_mem), NULL));
+  }
+
+  // set kernel arguments for bitonic global
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &ocl->mem_boxes));
+  if(use_index) {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &ocl->mem_data));
+  }
+  else {
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &ocl->mem_positions));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 4, sizeof(cl_mem), &ocl->mem_charges));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 5, sizeof(cl_mem), &ocl->mem_indices));
+    if(field != NULL)
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), &ocl->mem_field));
+    else
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), NULL));
+    if(potentials != NULL)
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), &ocl->mem_potentials));
+    else
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), NULL));
+  }
+
+  // run the first set! (local kernel)
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
+
+  // set argument for local kernel, will always start in the stage of minDist
+  int minDist = workgroupElementsNum / 2;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
+
+  // let everything finish first
+  CL_CHECK(clFinish(ocl->command_queue));
+
+  // main loop of bitonic hybrid sort
+  for(stage = workgroupElementsNum; stage < n; stage *= 2) {
+    // set stage argument for global kernel
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
+
+    for(unsigned int dist = stage; dist > minDist; dist /= 2) {
+      // set kernel argument for dist
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
+
+      // and finally run the kernel
+      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
+      CL_CHECK(clFinish(ocl->command_queue));
+    }
+
+    // now it's small enough to use the local kernel
+    // increse sort on global factor to simulate a sorting of a higher stage
+    sortOnGlobalFactor *= 2;
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+    // run the local kernel
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
+    CL_CHECK(clFinish(ocl->command_queue));
+  }
+
+  // the magic is already done
+  // wait for the sort to finish
+  CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
+  CL_CHECK(clReleaseEvent(ocl->sort_kernel_completion));
+  CL_CHECK(clFinish(ocl->command_queue));
+
+  // read back the results
+  printf(INFO_PRINT_PREFIX "  ocl: reading back\n");
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_boxes, CL_FALSE, offset * sizeof(box_t), nlocal * sizeof(box_t), boxes, 0, NULL, NULL));
+  // data
+  if(use_index) {
+    // let it finish
+    CL_CHECK(clFinish(ocl->command_queue));
+    // release right away
+    CL_CHECK(clReleaseMemObject(ocl->mem_boxes));
+    // and hand of to helper function
+    printf(INFO_PRINT_PREFIX "  ocl: move data\n");
+    fcs_ocl_sort_move_data(ocl, nlocal, offset, ocl->mem_data, positions, charges, indices, field, potentials);
+  }
+  else {
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_positions, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_charges, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_indices, CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+    if(field != NULL)
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_field, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    if(potentials != NULL)
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+    // wait for all reads to be done
+    CL_CHECK(clFinish(ocl->command_queue));
+
+
+    printf(INFO_PRINT_PREFIX "  ocl: releasing buffers\n");
+    // now destory our objects
+    CL_CHECK(clReleaseMemObject(ocl->mem_boxes));
+    // data
+    CL_CHECK(clReleaseMemObject(ocl->mem_positions));
+    CL_CHECK(clReleaseMemObject(ocl->mem_charges));
+    CL_CHECK(clReleaseMemObject(ocl->mem_indices));
+    if(field != NULL)
+      CL_CHECK(clReleaseMemObject(ocl->mem_field));
+    if(potentials != NULL)
+      CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
+  }
+
+
+#if FCS_NEAR_OCL_SORT_CHECK
+  fcs_ocl_sort_check(nlocal, boxes);
+#endif
+}
+
+
 #endif // FCS_NEAR_OCL_SORT
 
 
@@ -2029,6 +2317,14 @@ static fcs_int near_compute_init(fcs_near_t *near, fcs_float cutoff, const void 
         fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
         if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
         fcs_ocl_sort_radix_release(&near->context->ocl);
+        break;
+      case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
+        use_index = 0;
+      case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
+        fcs_ocl_sort_hybrid_prepare(&near->context->ocl, use_index);
+        fcs_ocl_sort_hybrid(&near->context->ocl, use_index, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+        if (near->context->ghost_boxes) fcs_ocl_sort_hybrid(&near->context->ocl, use_index, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        fcs_ocl_sort_hybrid_release(&near->context->ocl, use_index);
         break;
       default:
         printf("ocl_sort_algo = %d is unknown!\n", near->near_param.ocl_sort_algo);
