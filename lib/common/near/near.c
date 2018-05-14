@@ -1581,37 +1581,61 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
 
 static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *boxes, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
-  // todo: make them auto-scale
-  #define LOCAL_SIZE 128
-  #define SCAN_SIZE 128 // in elements, not work-items
-  int n = (nlocal % LOCAL_SIZE == 0)? n : nlocal + LOCAL_SIZE - (nlocal % LOCAL_SIZE);
+  // workgroup sizes
+  size_t local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+  size_t scan_size  = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+
+  // auto scale for normal groups
+  if(nlocal / 4 < FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
+      local_size = fcs_ocl_helper_next_power_of_2(nlocal / 8);
+
+      if(local_size < FCS_NEAR_OCL_SORT_WORKGROUP_MIN)
+        local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
+  }
+
+  int n = (nlocal % local_size == 0)? n : nlocal + local_size - (nlocal % local_size);
   int offset = n - nlocal;
+
+  // auto scale for scan (following the fomula)
+  scan_size = fcs_ocl_helper_next_power_of_2(FCS_NEAR_OCL_SORT_RADIX * n) / (2 * FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
+  if(scan_size < FCS_NEAR_OCL_SORT_WORKGROUP_MIN)
+    scan_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
 
   // calculate work sizes
   const size_t global_size_histogram  = n;
-  const size_t local_size_histogram   = LOCAL_SIZE;
+  const size_t local_size_histogram   = local_size;
 
   const size_t global_size_scan   = FCS_NEAR_OCL_SORT_RADIX * n / 2;
-  const size_t local_size_scan    = SCAN_SIZE / 2;
+  const size_t local_size_scan    = scan_size / 2;
 
-  const size_t scan2_groups_real  = FCS_NEAR_OCL_SORT_RADIX * n / SCAN_SIZE;
+  const size_t scan2_groups_real  = FCS_NEAR_OCL_SORT_RADIX * n / scan_size;
   const size_t scan2_groups       = fcs_ocl_helper_next_power_of_2(scan2_groups_real);
-  const size_t scan_buffer_size   = max(scan2_groups_real, SCAN_SIZE);
+  const size_t scan_buffer_size   = max(scan2_groups_real, scan_size);
 
   const size_t global_size_scan2  = scan2_groups / 2;
   const size_t local_size_scan2   = global_size_scan2;
 
   const size_t global_size_histogram_paste = FCS_NEAR_OCL_SORT_RADIX * n / 2;
-  const size_t local_size_histogram_paste  = SCAN_SIZE / 2;
+  const size_t local_size_histogram_paste  = scan_size / 2;
 
   const size_t global_size_reorder = n;
-  const size_t local_size_reorder  = LOCAL_SIZE;
+  const size_t local_size_reorder  = local_size;
 
   printf(INFO_PRINT_PREFIX "  ocl: Sort %d => %d elements with radixsort\n", nlocal, n);
   printf(INFO_PRINT_PREFIX "  ocl: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
-  printf(INFO_PRINT_PREFIX "  ocl: %d groups, %d elements each\n", n / LOCAL_SIZE, LOCAL_SIZE);
-  printf(INFO_PRINT_PREFIX "  ocl: Scan: %ld groups, %d elements each\n", global_size_scan / local_size_scan, SCAN_SIZE);
+  printf(INFO_PRINT_PREFIX "  ocl: %d groups, %d elements each\n", n / local_size, local_size);
+  printf(INFO_PRINT_PREFIX "  ocl: Scan: %ld groups, %d elements each\n", global_size_scan / local_size_scan, scan_size);
   printf(INFO_PRINT_PREFIX "  ocl: Scan2: %ld => %ld elements \n", scan2_groups_real, scan2_groups);
+
+  if(local_size_scan > FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
+    printf("local size for scan %d exceeds maximum size %d\n", local_size_scan, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
+    abort();
+  }
+
+  if(local_size_scan2 > FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
+    printf("local size for scan2 %d exceeds maximum size %d\n", local_size_scan2, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
+    abort();
+  }
 
   // create buffers
   cl_mem mem_keys       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(box_t), NULL, &_err));
@@ -1644,7 +1668,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram_paste, 1, sizeof(cl_mem), &mem_histograms_sum));
 
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 4, sizeof(cl_mem), &mem_histograms));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * LOCAL_SIZE, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * local_size, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(int), &n));
 
   // calculate the amount of passes from the datatype of boxes
