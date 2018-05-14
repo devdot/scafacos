@@ -3,12 +3,21 @@
 
 typedef void HERE_COMES_THE_CODE;
 
+#ifndef BITONIC_USE_INDEX
+#define BITONIC_USE_INDEX 0
+#endif
+
 __kernel void bitonic_global_2(__global key_t* key, const int stage, const int dist,
+#if BITONIC_USE_INDEX
+    __global index_t* data
+#else
     __global fcs_float* positions,
     __global fcs_float* charges, 
     __global fcs_gridsort_index_t* indices, 
     __global fcs_float* field, 
-    __global fcs_float* potentials)
+    __global fcs_float* potentials
+#endif
+    )
 {
     // long in OpenCL is 64 bits, therefore equal to  C99 long long 
 
@@ -26,6 +35,14 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
     key_t keyA = key[i];
     key_t keyB = key[j];
 
+#if BITONIC_USE_INDEX
+    // init data if needed
+    if(stage == 1) {
+        data[i] = i;
+        data[j] = j;
+    }
+#endif
+
     // calculate swap and check
     bool swap = (keyA > keyB) ^ desc;
     if(swap) {
@@ -36,6 +53,10 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
         key[j] = keyB;
 
         // now swap the data arrays
+#if BITONIC_USE_INDEX
+        swap_data_global(i, j, data);
+#else
         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
+#endif
     }
 }

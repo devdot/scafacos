@@ -22,8 +22,9 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_RADIX_BITS  2
 
 // enum for algo types
-#define FCS_NEAR_OCL_SORT_ALGO_RADIX    0
-#define FCS_NEAR_OCL_SORT_ALGO_BITONIC  1
+#define FCS_NEAR_OCL_SORT_ALGO_RADIX          0
+#define FCS_NEAR_OCL_SORT_ALGO_BITONIC        1
+#define FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX  2
 
 /*
  * MACROS
