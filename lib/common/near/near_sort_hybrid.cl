@@ -41,29 +41,40 @@ __kernel void bitonic_local(__global key_t* key,
 	int iBase = get_local_id(0) * quota;
 	// total number of elements is the amout of threads * elements per threads (quota)
 	int len = get_local_size(0) * quota; 
-
+	
 	// put the global offset onto the global pointers
     int globalOffset = len * get_group_id(0);
 	key += globalOffset;
 #if BITONIC_USE_INDEX
     data += globalOffset;
 #else
-    positions += globalOffset;
+    positions += globalOffset * 3;
     charges += globalOffset;
     indices += globalOffset;
     if(field != NULL)
-        field += globalOffset;
+        field += globalOffset * 3;
     if(potentials != NULL)
         potentials += globalOffset;
 #endif
-
+	
 	// load global keys into local
 	for(int i = 0; i < quota; i++) {
 		elements[i + iBase] = key[i + iBase];
+
+		// check if we need to write initial data index
+		if(stage == 1) {
+			int index = i + iBase + globalOffset;
 #if BITONIC_USE_INDEX
-        dataBuffer[i + iBase] = data[i + iBase];
+        	dataBuffer[i + iBase] = index;
 #endif
+		}
+		else {
+#if BITONIC_USE_INDEX
+        	dataBuffer[i + iBase] = data[i + iBase];
+#endif
+		}
     }
+
 	// sync up with other threads before continuing
 	barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -127,7 +138,12 @@ __kernel void bitonic_local(__global key_t* key,
                 index_t jData = dataBuffer[j];
 #endif
 				// calculate whether we have to swap
-				bool swap = (elements[j] < iElement) ^ (j < i) ^ desc;
+				bool swap = (jElement < iElement) ^ (j < i) ^ desc;
+#if BITONIC_USE_INDEX
+				// we need to make sure not to swap on equal,
+				//   this wouldn't matter for key, but data will be corrupted otherwise
+				swap = (jElement != iElement) && swap;
+#endif
 				// sync up the memory before and after swap
 				barrier(CLK_LOCAL_MEM_FENCE);
 				elements[i] = swap?jElement:iElement;
@@ -137,7 +153,6 @@ __kernel void bitonic_local(__global key_t* key,
 				barrier(CLK_LOCAL_MEM_FENCE);
 
 #if !BITONIC_USE_INDEX
-                // todo: optimize at least for use index
                 // and move data on global arrays
                 if(swap && j > i) {
                     // only the first of both work items works this

@@ -54,11 +54,10 @@ __kernel void move_data_float(__global const index_t* data, const int offset,
 {
     // first apply offset to data index array
     data += offset;
-    
     // get our index
     index_t indexOut  = get_global_id(0);
     index_t indexIn = data[indexOut] - offset;
-
+    
     // and now just write in to out
     out[indexOut] = in[indexIn];
 }
