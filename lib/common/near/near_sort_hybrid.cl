@@ -41,7 +41,7 @@ __kernel void bitonic_local(__global key_t* key,
 	int iBase = get_local_id(0) * quota;
 	// total number of elements is the amout of threads * elements per threads (quota)
 	int len = get_local_size(0) * quota; 
-	
+
 	// put the global offset onto the global pointers
     int globalOffset = len * get_group_id(0);
 	key += globalOffset;
@@ -56,7 +56,7 @@ __kernel void bitonic_local(__global key_t* key,
     if(potentials != NULL)
         potentials += globalOffset;
 #endif
-	
+
 	// load global keys into local
 	for(int i = 0; i < quota; i++) {
 		elements[i + iBase] = key[i + iBase];

@@ -2015,7 +2015,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, int use_index, fcs_int n
     for(unsigned int dist = stage; dist > minDist; dist /= 2) {
       // set kernel argument for dist
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
-      
+
       // and finally run the kernel
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
