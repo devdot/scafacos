@@ -33,13 +33,14 @@ extern "C" {
 #include "common/gridsort/gridsort.h"
 
 #define FCS_NEAR_OCL  1
+#define FCS_NEAR_OCL_SORT 1
 
 #if !HAVE_OPENCL
 # undef FCS_NEAR_OCL
 #endif
 
-#if HAVE_OPENCL
-#include "near_sort.h"
+#if !HAVE_OPENCL
+# undef FCS_NEAR_OCL_SORT
 #endif
 
 typedef fcs_float (*fcs_near_field_f)(const void *param, fcs_float dist);

@@ -1,3 +1,22 @@
+/*
+  Copyright (C) 2018 Thomas Schaller
+  
+  This file is part of ScaFaCoS.
+  
+  ScaFaCoS is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Lesser Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+  
+  ScaFaCoS is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Lesser Public License for more details.
+  
+  You should have received a copy of the GNU Lesser Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #ifndef __NEAR_SORT_H__
 #define __NEAR_SORT_H__
 
@@ -5,14 +24,17 @@
 extern "C" {
 #endif
 
-#define FCS_NEAR_OCL_SORT 1
-#if !HAVE_OPENCL
-# undef FCS_NEAR_OCL_SORT
-#endif
+#include "near.h"
 
 #if FCS_NEAR_OCL_SORT
 
+/*
+ * TOGGLES
+ */
+
 #define FCS_NEAR_OCL_SORT_CHECK 1
+
+#define FCS_NEAR_OCL_DATA_INDEX_IS_INT 1
 
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
@@ -28,6 +50,12 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID         3
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX   4
 
+/**
+ * @brief sort particles, ghost particles and associated data into boxes using OpenCl
+ * @param fcs_near_t* near field solver object
+ */
+void fcs_ocl_sort(fcs_near_t* near);
+
 /*
  * MACROS
  */
@@ -39,6 +67,13 @@ extern "C" {
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \
      _a > _b ? _a : _b; })
+
+
+#ifdef FCS_NEAR_OCL_DATA_INDEX_IS_INT
+  typedef int data_index_t;
+#else
+# error Type for box_t not available
+#endif
 
 
 #endif /* FCS_NEAR_OCL_SORT */
