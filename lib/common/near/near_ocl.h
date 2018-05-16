@@ -25,6 +25,8 @@
 extern "C" {
 #endif
 
+#if HAVE_OPENCL
+
 #include "near.h"
 
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
@@ -110,6 +112,8 @@ typedef struct
 #endif
 
 } fcs_ocl_context_t;
+
+#endif /* HAVE_OPENCL */
 
 
 #ifdef __cplusplus

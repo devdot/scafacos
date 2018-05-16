@@ -208,7 +208,11 @@ libfcs_near_mpiwrap_la_SOURCES = \
   include/sl_near___.h \
   include/sl_near__p.h \
   near.c \
+  near_sort.c \
   near.h \
+  near_common.h \
+  near_ocl.h \
+  near_sort.h \
   z_tools.h \
   $(sl_extra_include_SOURCE)
 

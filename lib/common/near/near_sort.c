@@ -17,13 +17,9 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
-#include "near.h"
+#include "near_common.h"
 
 #if FCS_NEAR_OCL_SORT
-
-#include "near_ocl.h"
-#include "near_sort.h"
 
 /*
  * OpenCL kernel strings
@@ -730,7 +726,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
   size_t global_size_local = n / quota;
   const size_t global_size_global = n/2;
 
-  printf(INFO_PRINT_PREFIX "  ocl: bitonic hybrid (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", use_index, nlocal, n);
+  printf(INFO_PRINT_PREFIX "  ocl: bitonic hybrid (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, nlocal, n);
   printf(INFO_PRINT_PREFIX "  ocl: %ld groups, %d elements each (quota %d)\n", global_size_local / local_size_local, workgroupElementsNum, quota);
   printf(INFO_PRINT_PREFIX "  ocl: local memory: %ld of %ld bytes\n", bytesPerElement * workgroupElementsNum, ocl->local_memory);
 
@@ -916,19 +912,19 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
 
 void fcs_ocl_sort(fcs_near_t* near) {
   // set usage of index to 1
-  near->context->ocl->use_index = 1;
+  near->context->ocl.use_index = 1;
 
   switch(near->near_param.ocl_sort_algo)
   {
     case FCS_NEAR_OCL_SORT_ALGO_RADIX:
-      near->context->ocl->use_index = 0;
+      near->context->ocl.use_index = 0;
       fcs_ocl_sort_radix_prepare(&near->context->ocl);
       fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
       if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
       fcs_ocl_sort_radix_release(&near->context->ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
-      near->context->ocl->use_index = 0;
+      near->context->ocl.use_index = 0;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
       fcs_ocl_sort_bitonic_prepare(&near->context->ocl);
       fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
@@ -936,7 +932,7 @@ void fcs_ocl_sort(fcs_near_t* near) {
       fcs_ocl_sort_bitonic_release(&near->context->ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
-      near->context->ocl->use_index = 0;
+      near->context->ocl.use_index = 0;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
       fcs_ocl_sort_hybrid_prepare(&near->context->ocl);
       fcs_ocl_sort_hybrid(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
