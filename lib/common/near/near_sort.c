@@ -444,10 +444,6 @@ static void fcs_ocl_sort_bitonic_prepare(fcs_ocl_context_t *ocl) {
   };
 
   ocl->sort_program_bitonic = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
-  if (ret != CL_SUCCESS) {
-    printf("ocl-bitonic: exited with code %d\n", ret);
-    return;
-  }
 
   // build the program
   if(ocl->use_index)
@@ -652,10 +648,6 @@ static void fcs_ocl_sort_hybrid_prepare(fcs_ocl_context_t *ocl) {
   };
 
   ocl->sort_program_hybrid = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
-  if (ret != CL_SUCCESS) {
-    printf(INFO_PRINT_PREFIX "ocl-hybrid: exited with code %d\n", ret);
-    return;
-  }
 
   // build the program
   if(ocl->use_index)
@@ -922,8 +914,10 @@ void fcs_ocl_sort(fcs_near_t* near) {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: start\n"););
 
 #ifdef DO_TIMING
-  for(int i = 0; i < sizeof(ocl->timing) / sizeof(ocl->timing[0]); i++)
+  for(int i = 0; i < sizeof(ocl->timing) / sizeof(ocl->timing[0]); i++) {
     ocl->timing[i] = 0.f;
+    ocl->timing_names[i] = NULL;
+  }
 #endif // DO_TIMING
 
   T_START(0, "sum");
