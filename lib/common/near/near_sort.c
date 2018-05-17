@@ -22,6 +22,17 @@
 #if FCS_NEAR_OCL_SORT
 
 /*
+ * Macros
+ */
+
+#ifdef DO_TIMING
+
+#define T_START(index, str) { ocl->timing_names[index] = str; TIMING_START(ocl->timing[index]); }
+#define T_STOP(index) { TIMING_STOP(ocl->timing[index]); }
+
+#endif // DO_TIMING
+
+/*
  * OpenCL kernel strings
  */
 static const char *fcs_ocl_cl_sort_config =
@@ -907,42 +918,106 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
  */
 
 void fcs_ocl_sort(fcs_near_t* near) {
-  // set usage of index to 1
-  near->context->ocl.use_index = 1;
-
+  fcs_ocl_context_t* ocl = &near->context->ocl;
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: start\n"););
 
+#ifdef DO_TIMING
+  for(int i = 0; i < sizeof(ocl->timing) / sizeof(ocl->timing[0]); i++)
+    ocl->timing[i] = 0.f;
+#endif // DO_TIMING
+
+  T_START(0, "sum");
+   // set usage of index to 1
+  near->context->ocl.use_index = 1;
+
+  T_START(1, "sum_prepare");
   switch(near->near_param.ocl_sort_algo)
   {
     case FCS_NEAR_OCL_SORT_ALGO_RADIX:
       near->context->ocl.use_index = 0;
-      fcs_ocl_sort_radix_prepare(&near->context->ocl);
-      fcs_ocl_sort_radix(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-      if (near->context->ghost_boxes) fcs_ocl_sort_radix(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-      fcs_ocl_sort_radix_release(&near->context->ocl);
+      fcs_ocl_sort_radix_prepare(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
       near->context->ocl.use_index = 0;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
-      fcs_ocl_sort_bitonic_prepare(&near->context->ocl);
-      fcs_ocl_sort_bitonic(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-      if (near->context->ghost_boxes) fcs_ocl_sort_bitonic(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-      fcs_ocl_sort_bitonic_release(&near->context->ocl);
+      fcs_ocl_sort_bitonic_prepare(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
       near->context->ocl.use_index = 0;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
-      fcs_ocl_sort_hybrid_prepare(&near->context->ocl);
-      fcs_ocl_sort_hybrid(&near->context->ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
-      if (near->context->ghost_boxes) fcs_ocl_sort_hybrid(&near->context->ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
-      fcs_ocl_sort_hybrid_release(&near->context->ocl);
+      fcs_ocl_sort_hybrid_prepare(ocl);
       break;
     default:
       printf("ocl_sort_algo = %d is unknown!\n", near->near_param.ocl_sort_algo);
       abort();
   }
+  T_STOP(1);
+
+  T_START(2, "sum_sort");
+  switch(near->near_param.ocl_sort_algo)
+  {
+    case FCS_NEAR_OCL_SORT_ALGO_RADIX:
+      fcs_ocl_sort_radix(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+      break;
+    case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
+    case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
+      fcs_ocl_sort_bitonic(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+      break;
+    case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
+    case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
+      fcs_ocl_sort_hybrid(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
+      break;
+  }
+  T_STOP(2);
+
+  // check for ghost boxed
+  if(near->context->ghost_boxes) {
+    T_START(3, "sum_sort");
+    switch(near->near_param.ocl_sort_algo)
+    {
+      case FCS_NEAR_OCL_SORT_ALGO_RADIX:
+        fcs_ocl_sort_radix(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        break;
+      case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
+      case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
+        fcs_ocl_sort_bitonic(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        break;
+      case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
+      case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
+        fcs_ocl_sort_hybrid(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
+        break;
+    }
+    T_STOP(3);
+  }
+
+  T_START(4, "sum_release");
+  switch(near->near_param.ocl_sort_algo)
+  {
+    case FCS_NEAR_OCL_SORT_ALGO_RADIX:
+      fcs_ocl_sort_radix_release(ocl);
+      break;
+    case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
+    case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
+      fcs_ocl_sort_bitonic_release(ocl);
+      break;
+    case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
+    case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
+      fcs_ocl_sort_hybrid_release(ocl);
+      break;
+  }
+  T_STOP(4);
+
+  // done with everything
+  T_STOP(0);
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: end\n"););
+
+#ifdef DO_TIMING
+  for(int i = 0; i < sizeof(ocl->timing) / sizeof(ocl->timing[0]); i++) {
+    if(ocl->timing_names[i] == NULL) continue;
+    printf("ocl-sort-timing: %s %f\n", ocl->timing_names[i], ocl->timing[i]);
+  }
+#endif // DO_TIMING
 }
 
 

@@ -109,6 +109,9 @@ typedef struct
   cl_kernel sort_kernel_move_data_gridsort_index;
 
   cl_event sort_kernel_completion;
+
+  double timing[50];
+  char* timing_names[50];
 #endif
 
 } fcs_ocl_context_t;
