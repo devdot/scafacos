@@ -76,9 +76,10 @@ static const char* fcs_ocl_cl_sort_radix =
  * helper functions
  */
 
-#ifdef FCS_NEAR_OCL_SORT_CHECK
+#ifdef DO_CHECK
 static int fcs_ocl_sort_check(fcs_int n, box_t* boxes) {
   // check the sort results to be correct
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: check sort\n"););
   for(int i = 1; i < n; i++) {
     if(boxes[i] < boxes[i - 1]) {
       // we got a fail in sorting
@@ -417,10 +418,6 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
   // destroy remaining buffers
   CL_CHECK(clReleaseMemObject(mem_data));
-
-#if FCS_NEAR_OCL_SORT_CHECK
-  fcs_ocl_sort_check(nlocal, boxes);
-#endif
 }
 
 
@@ -618,12 +615,6 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *
     if(potentials != NULL)
       CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
   }
-
-
-
-#if FCS_NEAR_OCL_SORT_CHECK
-  fcs_ocl_sort_check(nlocal, boxes);
-#endif
 }
 
 
@@ -897,11 +888,6 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
     if(potentials != NULL)
       CL_CHECK(clReleaseMemObject(ocl->mem_potentials));
   }
-
-
-#if FCS_NEAR_OCL_SORT_CHECK
-  fcs_ocl_sort_check(nlocal, boxes);
-#endif
 }
 
 
@@ -963,10 +949,13 @@ void fcs_ocl_sort(fcs_near_t* near) {
       break;
   }
   T_STOP(2);
+#ifdef DO_CHECK
+  fcs_ocl_sort_check(near->nparticles, near->context->real_boxes);
+#endif
 
   // check for ghost boxed
   if(near->context->ghost_boxes) {
-    T_START(3, "sum_sort");
+    T_START(3, "sum_ghost");
     switch(near->near_param.ocl_sort_algo)
     {
       case FCS_NEAR_OCL_SORT_ALGO_RADIX:
@@ -982,6 +971,9 @@ void fcs_ocl_sort(fcs_near_t* near) {
         break;
     }
     T_STOP(3);
+#ifdef DO_CHECK
+    fcs_ocl_sort_check(near->nghosts, near->context->ghost_boxes);
+#endif
   }
 
   T_START(4, "sum_release");

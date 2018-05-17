@@ -32,8 +32,6 @@ extern "C" {
  * TOGGLES
  */
 
-#define FCS_NEAR_OCL_SORT_CHECK 1
-
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT 1
 
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024
@@ -49,6 +47,10 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX  2
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID         3
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX   4
+
+#ifdef FCS_ENABLE_CHECK_NEAR
+#define DO_CHECK
+#endif
 
 /**
  * @brief sort particles, ghost particles and associated data into boxes using OpenCl
