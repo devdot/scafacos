@@ -110,8 +110,12 @@ typedef struct
 
   cl_event sort_kernel_completion;
 
-  double timing[50];
-  char* timing_names[50];
+#define TIMING_LEN 50
+  double* _timing;
+  double timing[TIMING_LEN];
+  double timing_ghost[TIMING_LEN];
+  char* timing_names[TIMING_LEN];
+#undef TIMING_LEN
 #endif
 
 } fcs_ocl_context_t;
