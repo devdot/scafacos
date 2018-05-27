@@ -29,6 +29,13 @@
 
 #define T_START(index, str) { ocl->timing_names[index] = str; TIMING_START(ocl->_timing[index]); }
 #define T_STOP(index) { TIMING_STOP(ocl->_timing[index]); }
+#define T_KERNEL(index, event, str) { if(ocl->_timing[index] < 0.f) ocl->_timing[index] = 0.f; ocl->timing_names[index] = "kernel_" str; cl_ulong start, end; CL_CHECK(clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL)); CL_CHECK(clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL)); ocl->_timing[index] += ((double)(end - start)) / 1000000000.f;}
+
+#else
+
+#define T_START(index, str) {};
+#define T_END(index) {};
+#define T_KERNEL(index, event, str) {};
 
 #endif // DO_TIMING
 
@@ -54,6 +61,7 @@ static const char *fcs_ocl_cl_sort_config =
 
   "#define RADIX " STR(FCS_NEAR_OCL_SORT_RADIX) "\n"
   "#define RADIX_BITS " STR(FCS_NEAR_OCL_SORT_RADIX_BITS) "\n"
+  "#define HYBRID_INDEX_GLOBAL " STR(FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL) "\n"
   ;
   // built in Makefile.am/.in  like near.cl_str.h
 static const char* fcs_ocl_cl_sort =
@@ -372,6 +380,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_histogram, 1, NULL, &global_size_histogram, &local_size_histogram, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(21, ocl->sort_kernel_completion, "radix_histrogram");
 
     // 2. scan histogram
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 0, sizeof(cl_mem), &mem_histograms));
@@ -379,6 +388,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_scan, 1, NULL, &global_size_scan, &local_size_scan, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(22, ocl->sort_kernel_completion, "radix_scan");
 
     // second scan on histogram_sum
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 0, sizeof(cl_mem), &mem_histograms_sum));
@@ -386,10 +396,12 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_scan, 1, NULL, &global_size_scan2, &local_size_scan2, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(23, ocl->sort_kernel_completion, "radix_scan2");
 
     // 3. paste histograms
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_histogram_paste, 1, NULL, &global_size_histogram_paste, &local_size_histogram_paste, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(24, ocl->sort_kernel_completion, "radix_histrogram_paste");
 
     // 4. reorder
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 0, sizeof(cl_mem), &mem_keys));
@@ -400,6 +412,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_reorder, 1, NULL, &global_size_reorder, &local_size_reorder, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(25, ocl->sort_kernel_completion, "radix_reorder");
 
     // swap the swap buffers
     cl_mem mem_tmp = mem_keys;
@@ -587,6 +600,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
       CL_CHECK(clFinish(ocl->command_queue));
+      T_KERNEL(21, ocl->sort_kernel_completion, "bitonic_global_2");
     }
   }
 
@@ -663,6 +677,9 @@ static void fcs_ocl_sort_hybrid_prepare(fcs_ocl_context_t *ocl) {
     fcs_ocl_cl_sort_hybrid
   };
 
+
+  printf("%s\n", fcs_ocl_cl_sort_config);
+  
   ocl->sort_program_hybrid = CL_CHECK_ERR(clCreateProgramWithSource(ocl->context, sizeof(sources) / sizeof(sources[0]), sources, NULL, &_err));
 
   // build the program
@@ -718,8 +735,10 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
   // calculate parameters
   size_t local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
   size_t bytesPerElement = sizeof(box_t);
+#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
   if(ocl->use_index)
     bytesPerElement += sizeof(data_index_t);
+#endif
   
   int quota = ocl->local_memory / (local_size_local * bytesPerElement);
 
@@ -740,7 +759,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
   const size_t global_size_global = n/2;
 
   INFO_CMD(
-    printf(INFO_PRINT_PREFIX "ocl-hybrid: bitonic hybrid (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, nlocal, n);
+    printf(INFO_PRINT_PREFIX "ocl-hybrid: bitonic hybrid (use index: %d, index global: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL, nlocal, n);
     printf(INFO_PRINT_PREFIX "ocl-hybrid: %ld groups, %d elements each (quota %d)\n", global_size_local / local_size_local, workgroupElementsNum, quota);
     printf(INFO_PRINT_PREFIX "ocl-hybrid: local memory: %ld of %ld bytes\n", bytesPerElement * workgroupElementsNum, ocl->local_memory);
   );
@@ -801,7 +820,9 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
    if(ocl->use_index) {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &ocl->mem_data));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 8, workgroupElementsNum * sizeof(int), NULL));
+#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 8, workgroupElementsNum * sizeof(data_index_t), NULL));
+#endif
   }
   else {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &ocl->mem_positions));
@@ -837,6 +858,8 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
   }
 
   // run the first set! (local kernel)
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n"););
+  T_START(12, "sort");
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
 
   // set argument for local kernel, will always start in the stage of minDist
@@ -845,10 +868,9 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
 
   // let everything finish first
   CL_CHECK(clFinish(ocl->command_queue));
+  T_KERNEL(21, ocl->sort_kernel_completion, "bitonic_local_pre");
 
   // main loop of bitonic hybrid sort
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n"););
-  T_START(12, "sort");
   for(stage = workgroupElementsNum; stage < n; stage *= 2) {
     // set stage argument for global kernel
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
@@ -861,6 +883,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
       CL_CHECK(clFinish(ocl->command_queue));
+      T_KERNEL(22, ocl->sort_kernel_completion, "bitonic_global_2");
     }
 
     // now it's small enough to use the local kernel
@@ -871,6 +894,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
+    T_KERNEL(23, ocl->sort_kernel_completion, "bitonic_local");
   }
   T_STOP(12);
 

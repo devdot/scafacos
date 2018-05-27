@@ -848,8 +848,11 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
 
   ocl->compute_kernel = clCreateKernel(ocl->program, "fcs_ocl_near_compute", &ret);
   if (ret != CL_SUCCESS) return 1;
-
+#ifdef DO_TIMING
+  ocl->command_queue = clCreateCommandQueue(ocl->context, device_id, CL_QUEUE_PROFILING_ENABLE , &ret);
+#else
   ocl->command_queue = clCreateCommandQueue(ocl->context, device_id, 0, &ret);
+#endif
   if (ret != CL_SUCCESS) return 1;
 
   return 0;

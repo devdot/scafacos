@@ -10,6 +10,10 @@ typedef void HERE_COMES_THE_CODE;
 #define HYBRID_USE_INDEX 0
 #endif
 
+#ifndef HYBRID_INDEX_GLOBAL
+#define HYBRID_INDEX_GLOBAL 0
+#endif
+
 // int sortDesc, sortOnGlobal are to be treated like a bool
 // usually will start in stage 1
 // use sortOnGlobalFactor: 1 if every second should be in the other direction. 2 if it should toggle every 2 groups etc.
@@ -20,10 +24,12 @@ __kernel void bitonic_local(__global key_t* key,
     int stage,
     const int sortOnGlobal,
     const int sortOnGlobalFactor,
-#if BITONIC_USE_INDEX
-    __global index_t* data,
-    __local index_t* dataBuffer
-#else
+#if HYBRID_USE_INDEX
+    __global index_t* data
+#if !HYBRID_INDEX_GLOBAL
+    ,__local index_t* dataBuffer
+#endif
+#else // HYBRID_USE_INDEX
     __global fcs_float* positions,
     __global fcs_float* charges, 
     __global fcs_gridsort_index_t* indices, 
@@ -45,9 +51,12 @@ __kernel void bitonic_local(__global key_t* key,
 	// put the global offset onto the global pointers
     int globalOffset = len * get_group_id(0);
 	key += globalOffset;
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
     data += globalOffset;
-#else
+#if HYBRID_INDEX_GLOBAL
+	__global index_t* dataBuffer = data;
+#endif
+#else // HYBRID_USE_INDEX
     positions += globalOffset * 3;
     charges += globalOffset;
     indices += globalOffset;
@@ -64,12 +73,12 @@ __kernel void bitonic_local(__global key_t* key,
 		// check if we need to write initial data index
 		if(stage == 1) {
 			int index = i + iBase + globalOffset;
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
         	dataBuffer[i + iBase] = index;
 #endif
 		}
 		else {
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX && !HYBRID_INDEX_GLOBAL
         	dataBuffer[i + iBase] = data[i + iBase];
 #endif
 		}
@@ -99,7 +108,7 @@ __kernel void bitonic_local(__global key_t* key,
 					if(swap) {
 						swap_keys(elements[i], elements[j]);
                         // move data along
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
                         swap_data_global(i, j, dataBuffer);
 #else
                         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
@@ -133,13 +142,13 @@ __kernel void bitonic_local(__global key_t* key,
 				// save keys
 				key_t iElement = elements[i];
 				key_t jElement = elements[j];
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
                 index_t iData = dataBuffer[i];
                 index_t jData = dataBuffer[j];
 #endif
 				// calculate whether we have to swap
 				bool swap = (jElement < iElement) ^ (j < i) ^ desc;
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
 				// we need to make sure not to swap on equal,
 				//   this wouldn't matter for key, but data will be corrupted otherwise
 				swap = (jElement != iElement) && swap;
@@ -147,12 +156,12 @@ __kernel void bitonic_local(__global key_t* key,
 				// sync up the memory before and after swap
 				barrier(CLK_LOCAL_MEM_FENCE);
 				elements[i] = swap?jElement:iElement;
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
                 dataBuffer[i] = swap?jData:iData;
 #endif
 				barrier(CLK_LOCAL_MEM_FENCE);
 
-#if !BITONIC_USE_INDEX
+#if !HYBRID_USE_INDEX
                 // and move data on global arrays
                 if(swap && j > i) {
                     // only the first of both work items works this
@@ -179,7 +188,7 @@ __kernel void bitonic_local(__global key_t* key,
 					if(swap) {
 						swap_keys(elements[i], elements[j]);
                         // and swap data along
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX
                         swap_data_global(i, j, dataBuffer);
 #else
                         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
@@ -199,7 +208,7 @@ __kernel void bitonic_local(__global key_t* key,
 	// save back the results to global memory
 	for(int i = 0; i < quota; i++) {
 		 key[i + iBase] = elements[i + iBase];
-#if BITONIC_USE_INDEX
+#if HYBRID_USE_INDEX && !BITONIC_INDEX_GLOBAL
         data[i + iBase] = dataBuffer[i + iBase];
 #endif
     }
