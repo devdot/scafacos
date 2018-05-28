@@ -47,8 +47,10 @@ static const char *fcs_ocl_cl_sort_config =
   // OpenCL long is equal to C99 long long
   "typedef long fcs_gridsort_index_t;\n"
   // for data index arrays
-#ifdef FCS_NEAR_OCL_DATA_INDEX_IS_INT
+#if FCS_NEAR_OCL_DATA_INDEX_IS_INT
   "typedef int index_t;\n"
+#elif FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG
+  "typedef long index_t;\n"
 #else
 # error Type for box_t not available
 #endif
@@ -112,6 +114,21 @@ unsigned int fcs_ocl_helper_next_power_of_2(unsigned int n) {
   }
  
   return 1 << count;
+}
+
+unsigned int fcs_ocl_helper_prev_power_of_2(unsigned int n) {
+  unsigned count = 0;
+
+  // already a power of 2?
+  if (n && !(n & (n - 1)))
+    return n;
+ 
+  while(n != 0) {
+    n  >>= 1;
+    count += 1;
+  }
+ 
+  return 1 << (count - 1);
 }
 
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, fcs_int nlocal, int offset, cl_mem mem_data, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
@@ -302,7 +319,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *bo
 
   const size_t scan2_groups_real  = FCS_NEAR_OCL_SORT_RADIX * n / scan_size;
   const size_t scan2_groups       = fcs_ocl_helper_next_power_of_2(scan2_groups_real);
-  const size_t scan_buffer_size   = max(scan2_groups_real, scan_size);
+  const size_t scan_buffer_size   = max(scan2_groups, scan_size);
 
   const size_t global_size_scan2  = scan2_groups / 2;
   const size_t local_size_scan2   = global_size_scan2;
@@ -738,6 +755,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, box_t *b
 #endif
   
   int quota = ocl->local_memory / (local_size_local * bytesPerElement);
+  quota = fcs_ocl_helper_prev_power_of_2(quota);
 
   while (n / (2 * quota) < local_size_local && local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
     // we need to adjust and make smaller groups

@@ -32,7 +32,8 @@ extern "C" {
  * TOGGLES
  */
 
-#define FCS_NEAR_OCL_DATA_INDEX_IS_INT 1
+#define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0
+#define FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG  1
 
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
@@ -42,7 +43,7 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_RADIX_BITS  2
 
 // configuration for hybrid sort
-#define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 1
+#define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
 
 // enum for algo types
 #define FCS_NEAR_OCL_SORT_ALGO_RADIX          0
@@ -74,8 +75,10 @@ void fcs_ocl_sort(fcs_near_t* near);
      _a > _b ? _a : _b; })
 
 
-#ifdef FCS_NEAR_OCL_DATA_INDEX_IS_INT
+#if FCS_NEAR_OCL_DATA_INDEX_IS_INT
   typedef int data_index_t;
+#elif FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG
+  typedef long long data_index_t;
 #else
 # error Type for box_t not available
 #endif

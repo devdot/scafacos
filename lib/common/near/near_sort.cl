@@ -5,11 +5,19 @@ typedef void HERE_COMES_THE_CODE;
 
 #define NULL 0
 
+#ifdef cl_nv_pragma_unroll
+#define NVIDIA
+#endif
+
 // swap keys (long) using XOR
 #define swap_keys(a, b) { a = a ^ b; b = a ^ b; a = a ^ b; }
 
 // generic swap
+#ifdef NVIDIA
+#define swap_data(a, b) { __private auto tmp = a; a = b; b = tmp; }
+#else
 #define swap_data(a, b) { typeof(a) tmp = a; a = b; b = tmp; }
+#endif
 
 // generic swap on global array
 #define swap_data_global(i, j, array) { swap_data(array[i], array[j]); }
