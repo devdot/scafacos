@@ -44,6 +44,7 @@ extern "C" {
 
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
+#define FCS_NEAR_OCL_SORT_HYBRID_MOVE_SPLIT_N 1024 * 1024 * 32 // 2^25
 
 // enum for algo types
 #define FCS_NEAR_OCL_SORT_ALGO_RADIX          0
