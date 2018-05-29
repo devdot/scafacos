@@ -98,6 +98,13 @@ typedef struct
   cl_program sort_program_hybrid;
   cl_kernel sort_kernel_bitonic_local;
 
+  cl_program sort_program_bucket;
+  cl_kernel sort_kernel_bucket_sample;
+  cl_kernel sort_kernel_bucket_prefix_columns;
+  cl_kernel sort_kernel_bucket_prefix_final;
+  cl_kernel sort_kernel_bucket_index_samples;
+  cl_kernel sort_kernel_bucket_relocate;
+
   cl_program sort_program_radix;
   cl_kernel sort_kernel_radix_histogram;
   cl_kernel sort_kernel_radix_histogram_paste;
@@ -110,7 +117,7 @@ typedef struct
 
   cl_event sort_kernel_completion;
 
-#define TIMING_LEN 50
+#define TIMING_LEN 60
   double* _timing;
   double timing[TIMING_LEN];
   double timing_ghost[TIMING_LEN];

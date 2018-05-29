@@ -217,9 +217,9 @@ libfcs_near_mpiwrap_la_SOURCES = \
   $(sl_extra_include_SOURCE)
 
 if ENABLE_OPENCL
-nodist_libfcs_near_mpiwrap_la_SOURCES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h
-BUILT_SOURCES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h
-CLEANFILES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h
+nodist_libfcs_near_mpiwrap_la_SOURCES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h near_sort_bucket.cl_str.h
+BUILT_SOURCES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h near_sort_bucket.cl_str.h
+CLEANFILES = near.cl_str.h near_sort.cl_str.h near_sort_bitonic.cl_str.h near_sort_hybrid.cl_str.h near_sort_radix.cl_str.h near_sort_bucket.cl_str.h
 
 near.cl_str.h: $(srcdir)/near.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
 	USE_CPP="no" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="no" HEXPAD="16" HEXNULL="yes" \
@@ -237,6 +237,9 @@ near_sort_hybrid.cl_str.h: $(srcdir)/near_sort_hybrid.cl.c Makefile $(top_srcdir
 	USE_CPP="no" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="no" HEXPAD="16" HEXNULL="yes" \
 	$(SHELL) $(top_srcdir)/build-aux/opencl-stringify $< > $@
 
+near_sort_bucket.cl_str.h: $(srcdir)/near_sort_bucket.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
+	USE_CPP="no" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="no" HEXPAD="16" HEXNULL="yes" \
+	$(SHELL) $(top_srcdir)/build-aux/opencl-stringify $< > $@
 
 near_sort_radix.cl_str.h: $(srcdir)/near_sort_radix.cl.c Makefile $(top_srcdir)/build-aux/opencl-stringify
 	USE_CPP="no" FILTER_TO="HERE_COMES_THE_CODE" USE_HEX="no" HEXPAD="16" HEXNULL="yes" \

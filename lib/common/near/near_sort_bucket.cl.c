@@ -1,0 +1,179 @@
+/*
+ * kernel code for GPU Bucket Sort
+ * 
+ */
+
+typedef void HERE_COMES_THE_CODE;
+
+
+// will get one sample from keys into samples, each have dist distance between them
+__kernel void bucket_sample(__global const key_t* keys, int dist, __global key_t* samples) {
+	samples[get_global_id(0)] = keys[get_global_id(0) * dist];
+}
+
+// kernel for indexing of global samples
+// returns the next bigger element when the searched sample was not found
+__kernel void bucket_index_samples(__global const key_t* keys, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize) {
+	// offset the keys and matrix pointer to our group
+	keys += groupSize * get_group_id(0);
+	int matrixRow = get_local_size(0) * get_group_id(0);
+	offsets += matrixRow;
+	sizes += matrixRow; 
+
+	key_t sample = samples[get_local_id(0)];
+
+	// now perform binary search for sample
+	int l = 0;
+	int r = groupSize -1;
+    key_t element;
+	int index;
+	int pos = -1;
+	while(l <= r) { 
+		// calculate the element index to select
+		// (l + r) /2
+		index = l + ((r - l) / 2);
+		// retrieve the element
+		element = keys[index];
+		if(element < sample) {
+			// search right
+			l = index + 1;
+		}
+		else if(element > sample) {
+			// search left
+			r = index - 1;
+		}
+		else {
+			// it's equal
+			pos = index;
+			break;
+		}
+	}
+
+	// solve problem with not finding 0
+	// first sample is always starting at 0
+	if(get_local_id(0) == 0)
+		pos = 0;
+
+	// write our result back
+	offsets[get_local_id(0)] = (pos != -1) ? pos : r+1;
+
+	// now calculate sizes
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	if(get_local_id(0) != get_local_size(0) - 1)
+		sizes[get_local_id(0)] = offsets[get_local_id(0) + 1] - offsets[get_local_id(0)];
+	else
+		// next element would be at position groupSize
+		sizes[get_local_id(0)] = groupSize - offsets[get_local_id(0)];
+
+}
+
+// TODO: use proper scan!
+// one thread per column
+__kernel void bucket_prefix_columns(__global int* matrix, const int rows) {
+	// each thread will do one column
+	int index = get_global_id(0);
+	int cols = get_global_size(0);
+
+	int last = matrix[index];
+
+	for(int row = 1; row < rows; row++) {
+		index += cols;
+
+		last += matrix[index];
+		matrix[index] = last;
+	}
+}
+
+// one thread per column
+__kernel void bucket_prefix_final(__global const int* matrix,
+	__local int* row,
+	__global unsigned int* bucketPos,
+	__global unsigned int* bucketContainers,
+	__global unsigned int* bucketOffsets,
+	const int rows)
+{
+	int i = get_local_id(0)
+	int cols = get_local_size(0);
+
+	// offset the matrix to it's last row
+	matrix += (rows - 1) * cols;
+
+	// load data
+	row[i] = matrix[i];
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	// we got the sizes of each bucket in row
+
+	// find the next bigger power of 2 for container size
+	int container = 1;
+	while(container < row[i])
+		container <<= 1;
+
+	bucketContainers[i] = container;
+
+	// and calculate the offset within the container
+	bucketOffsets[i] = container - row[i];
+
+	// now sum up the positions
+	int j;
+	int temp;
+	for(int dist = 1; dist < cols; dist <<= 1) {
+		j = i + dist;
+		
+		// make sure we don't read and write at the same time
+		temp = row[i];
+		barrier(CLK_LOCAL_MEM_FENCE);
+
+		if(j < cols)
+			row[j] += temp;
+
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+
+	// save back to array
+	bucketPos[i] = row[i];
+}
+
+// one thread per row (and bucket)
+// global size is number of rows (is called bucket-wise)
+__kernel void bucket_relocate(__global key_t* keys,
+    __global index_t* index,
+    __global key_t* bucket_keys,
+    __global indx_t* bucket_index,
+    const int bucketNum,
+    const int cols,
+    const int elementsPerRow,
+    __global const int* bucketInnerOffsets,
+    __global const int* matrixOffsets,
+    __global const int* matrixPrefix)
+{
+	int rows = get_global_size(0);
+	int row = get_global_id(0);
+	
+	// offset the matrix
+	__global int* rowOffsets = matrixOffsets + row * cols;
+
+	// calculate the offset in global
+	// offset of the row in global arrays
+	int globalOffset = row * elementsPerRow;
+	// offset of the bucket within the row
+	globalOffset += rowOffsets[bucketNum];
+
+	// now calculate the size of this partition
+	int size = ((bucketNum < cols -1) ? rowOffsets[bucketNum + 1] : elementsPerRow) - rowOffsets[bucketNum];
+
+	// and calculate the offset within the bucket
+	int bucketOffset = bucketInnerOffsets[bucketNum];
+	// the 0th row contains the offset for the first row (because it's the size of the 0th row)
+	bucketOffset += (row == 0) ? 0 : matrixPrefix[(row - 1) * cols + bucketNum];
+
+	// now move data
+	keys += globalOffset;
+    index += globalOffset;
+	bucket += bucketOffset;
+
+	for(int i = 0; i < size; i++) {
+		bucket_keys[i]  = keys[i];
+        bucket_index[i] = index[i];
+    }
+}
