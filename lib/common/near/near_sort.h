@@ -32,6 +32,9 @@ extern "C" {
  * TOGGLES
  */
 
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 16 // 2^24
+#define FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL    1
+
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0
 #define FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG  1
 
@@ -44,7 +47,6 @@ extern "C" {
 
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
-#define FCS_NEAR_OCL_SORT_HYBRID_MOVE_SPLIT_N 1024 * 1024 * 32 // 2^25
 
 // enum for algo types
 #define FCS_NEAR_OCL_SORT_ALGO_RADIX          0

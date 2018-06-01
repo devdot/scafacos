@@ -70,18 +70,9 @@ __kernel void bitonic_local(__global key_t* key,
 	for(int i = 0; i < quota; i++) {
 		elements[i + iBase] = key[i + iBase];
 
-		// check if we need to write initial data index
-		if(stage == 1) {
-			int index = i + iBase + globalOffset;
-#if HYBRID_USE_INDEX
-        	dataBuffer[i + iBase] = index;
-#endif
-		}
-		else {
 #if HYBRID_USE_INDEX && !HYBRID_INDEX_GLOBAL
-        	dataBuffer[i + iBase] = data[i + iBase];
+        dataBuffer[i + iBase] = data[i + iBase];
 #endif
-		}
     }
 
 	// sync up with other threads before continuing
@@ -105,6 +96,9 @@ __kernel void bitonic_local(__global key_t* key,
 
 					// calculate swap if the elements are not in the desired order (using xor)
 					bool swap = (elements[i] > elements[j]) ^ desc;
+#ifdef NO_SWAP_ON_EQUAL
+					swap = swap && (elements[i] != elements[j]);
+#endif
 					if(swap) {
 						swap_keys(elements[i], elements[j]);
                         // move data along
@@ -162,6 +156,9 @@ __kernel void bitonic_local(__global key_t* key,
 				barrier(CLK_LOCAL_MEM_FENCE);
 
 #if !HYBRID_USE_INDEX
+#ifdef NO_SWAP_ON_EQUAL
+				swap = swap && (elements[i] != elements[j]);
+#endif
                 // and move data on global arrays
                 if(swap && j > i) {
                     // only the first of both work items works this
@@ -185,6 +182,9 @@ __kernel void bitonic_local(__global key_t* key,
 
 					// calculate swap if the elements are not in the desired order (using xor)
 					bool swap = (elements[i] > elements[j]) ^ desc;
+#ifdef NO_SWAP_ON_EQUAL
+					swap = swap && (elements[i] != elements[j]);
+#endif
 					if(swap) {
 						swap_keys(elements[i], elements[j]);
                         // and swap data along
@@ -207,7 +207,7 @@ __kernel void bitonic_local(__global key_t* key,
 	// don't need a barrier here, we got one after the last write
 	// save back the results to global memory
 	for(int i = 0; i < quota; i++) {
-		 key[i + iBase] = elements[i + iBase];
+		key[i + iBase] = elements[i + iBase];
 #if HYBRID_USE_INDEX && !BITONIC_INDEX_GLOBAL
         data[i + iBase] = dataBuffer[i + iBase];
 #endif

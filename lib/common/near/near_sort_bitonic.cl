@@ -35,16 +35,11 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
     key_t keyA = key[i];
     key_t keyB = key[j];
 
-#if BITONIC_USE_INDEX
-    // init data if needed
-    if(stage == 1) {
-        data[i] = i;
-        data[j] = j;
-    }
-#endif
-
     // calculate swap and check
     bool swap = (keyA > keyB) ^ desc;
+#ifdef NO_SWAP_ON_EQUAL
+	swap = swap && (keyA != keyB);
+#endif
     if(swap) {
         swap_keys(keyA, keyB);
 
@@ -60,3 +55,12 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
 #endif
     }
 }
+
+#if BITONIC_USE_INDEX
+
+__kernel void init_index(__global index_t* index) {
+    index_t i = get_global_id(0);
+    index[i] = i;
+}
+
+#endif // BITONIC_USE_INDeX

@@ -24,35 +24,36 @@ __kernel void bucket_index_samples(__global const key_t* keys, __global const ke
 
 	// now perform binary search for sample
 	int l = 0;
-	int r = groupSize -1;
-    key_t element;
+	int r = groupSize;
+	key_t element;
 	int index;
 	int pos = -1;
-	while(l <= r) { 
+	// take the left most matching
+	while(r - l > 1) {
 		// calculate the element index to select
 		// (l + r) /2
 		index = l + ((r - l) / 2);
 		// retrieve the element
 		element = keys[index];
-		if(element < sample) {
-			// search right
-			l = index + 1;
-		}
-		else if(element > sample) {
+		if(element >= sample) {
 			// search left
-			r = index - 1;
+			r = index;
 		}
 		else {
-			// it's equal
-			pos = index;
-			break;
+			// go right
+			l = index;
 		}
 	}
-
-	// solve problem with not finding 0
-	// first sample is always starting at 0
-	if(get_local_id(0) == 0)
-		pos = 0;
+	// exception for finding elements at index 0 when they're the same as the element on index 1
+	if(l == 0 && r == 1) {
+		index = 0;
+		element = keys[index];
+		if(element >= sample) {
+			r = index;
+		}
+		// l is alread 0
+	}
+	pos = r;
 
 	// write our result back
 	offsets[get_local_id(0)] = (pos != -1) ? pos : r+1;
@@ -64,7 +65,6 @@ __kernel void bucket_index_samples(__global const key_t* keys, __global const ke
 	else
 		// next element would be at position groupSize
 		sizes[get_local_id(0)] = groupSize - offsets[get_local_id(0)];
-
 }
 
 // TODO: use proper scan!
@@ -92,7 +92,7 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	__global unsigned int* bucketOffsets,
 	const int rows)
 {
-	int i = get_local_id(0)
+	int i = get_local_id(0);
 	int cols = get_local_size(0);
 
 	// offset the matrix to it's last row
@@ -108,6 +108,10 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	int container = 1;
 	while(container < row[i])
 		container <<= 1;
+
+	// fix 0 size buckets (should not happen to much though because that kills performance)
+	if(row[i] == 0)
+		container = 0;
 
 	bucketContainers[i] = container;
 
@@ -139,7 +143,7 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 __kernel void bucket_relocate(__global key_t* keys,
     __global index_t* index,
     __global key_t* bucket_keys,
-    __global indx_t* bucket_index,
+    __global index_t* bucket_index,
     const int bucketNum,
     const int cols,
     const int elementsPerRow,
@@ -151,7 +155,7 @@ __kernel void bucket_relocate(__global key_t* keys,
 	int row = get_global_id(0);
 	
 	// offset the matrix
-	__global int* rowOffsets = matrixOffsets + row * cols;
+	__global const int* rowOffsets = matrixOffsets + row * cols;
 
 	// calculate the offset in global
 	// offset of the row in global arrays
@@ -170,7 +174,8 @@ __kernel void bucket_relocate(__global key_t* keys,
 	// now move data
 	keys += globalOffset;
     index += globalOffset;
-	bucket += bucketOffset;
+	bucket_keys += bucketOffset;
+	bucket_index += bucketOffset;
 
 	for(int i = 0; i < size; i++) {
 		bucket_keys[i]  = keys[i];

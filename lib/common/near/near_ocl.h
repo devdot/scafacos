@@ -115,6 +115,8 @@ typedef struct
   cl_kernel sort_kernel_move_data_float_triple;
   cl_kernel sort_kernel_move_data_gridsort_index;
 
+  cl_kernel sort_kernel_init_index;
+
   cl_event sort_kernel_completion;
 
 #define TIMING_LEN 60
