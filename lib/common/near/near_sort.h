@@ -48,6 +48,15 @@ extern "C" {
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
 
+// configuration for bucket sort
+// set only either to true
+#define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES    0
+#define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET 1
+
+#if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES && FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
+#error Cannot enable both optimizations at once
+#endif
+
 // enum for algo types
 #define FCS_NEAR_OCL_SORT_ALGO_RADIX          0
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC        1
