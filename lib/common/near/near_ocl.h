@@ -87,11 +87,6 @@ typedef struct
 
   cl_ulong local_memory;
 
-  cl_mem mem_boxes;
-  cl_mem mem_data;
-  
-  cl_mem mem_indices;
-
   cl_program sort_program_bitonic;
   cl_kernel sort_kernel_bitonic_global_2; 
 

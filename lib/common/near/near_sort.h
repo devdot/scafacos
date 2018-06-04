@@ -80,9 +80,9 @@ void fcs_ocl_sort(fcs_near_t* near);
 
 
 #if FCS_NEAR_OCL_DATA_INDEX_IS_INT
-  typedef int data_index_t;
+  typedef int sort_index_t;
 #elif FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG
-  typedef long long data_index_t;
+  typedef long long sort_index_t;
 #else
 # error Type for box_t not available
 #endif
