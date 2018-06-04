@@ -1055,7 +1055,10 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
   }
 
   // run the first set! (local kernel)
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n"););
+  INFO_CMD(
+    if(!onlySort)
+      printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n");
+  );
   T_START(22, "sort");
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
 
@@ -1495,7 +1498,14 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
   CL_CHECK(clReleaseMemObject(mem_keys));
 
   // step  sort the buckets
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket:  sort buckets\n"););
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #9 sort buckets\n"););
+  INFO_CMD(
+    printf(INFO_PRINT_PREFIX "ocl-bucket: buckets: [(%d, %d)", bucketContainers[0] - bucketOffsets[0], bucketContainers[0]);
+    for(int i = 1; i < globalSampleNum; i++) {
+      printf(", (%d, %d)", bucketContainers[i] - bucketOffsets[i], bucketContainers[i]);
+    }
+    printf("]\n");
+  );
   T_START(19, "sort_buckets");
   {
     for(unsigned int i = 0; i < globalSampleNum; i++) {
