@@ -250,6 +250,11 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, fcs_int nlocal, int of
 
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, fcs_int nlocal, int offset, cl_mem mem_data, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+  if(nlocal >= FCS_NEAR_OCL_SORT_MOVE_SPLIT_N) {
+    fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_data, positions, charges, indices, field, potentials);
+    return;
+  }
+
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data\n"););
   T_START(24, "move_data");
 
