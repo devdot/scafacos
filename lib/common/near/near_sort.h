@@ -44,6 +44,7 @@ extern "C" {
 // configuration for radix sort
 #define FCS_NEAR_OCL_SORT_RADIX       4
 #define FCS_NEAR_OCL_SORT_RADIX_BITS  2
+#define FCS_NEAR_OCL_SORT_RADIX_SCALE 1
 
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
@@ -58,12 +59,12 @@ extern "C" {
 #endif
 
 // enum for algo types
-#define FCS_NEAR_OCL_SORT_ALGO_RADIX          0
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC        1
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX  2
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID         3
 #define FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX   4
 #define FCS_NEAR_OCL_SORT_ALGO_BUCKET         5
+#define FCS_NEAR_OCL_SORT_ALGO_RADIX          6
 
 #ifdef FCS_ENABLE_CHECK_NEAR
 #define DO_CHECK
