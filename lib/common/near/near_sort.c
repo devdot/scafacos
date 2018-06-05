@@ -98,7 +98,7 @@ static const char* fcs_ocl_cl_sort_radix =
  */
 
 #ifdef DO_CHECK
-static int fcs_ocl_sort_check(fcs_int n, sort_key_t* keys) {
+static int fcs_ocl_sort_check(size_t n, sort_key_t* keys) {
   // check the sort results to be correct
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: check sort\n"););
   for(int i = 1; i < n; i++) {
@@ -111,7 +111,7 @@ static int fcs_ocl_sort_check(fcs_int n, sort_key_t* keys) {
   return 1;
 }
 
-static int fcs_ocl_sort_check_index(fcs_ocl_context_t* ocl, fcs_int n, sort_key_t* original_keys, fcs_int offset, cl_mem* mem_keys, cl_mem* mem_index) {
+static int fcs_ocl_sort_check_index(fcs_ocl_context_t* ocl, size_t n, sort_key_t* original_keys, size_t offset, cl_mem* mem_keys, cl_mem* mem_index) {
   // check if the index maps back to the original keys
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: check index\n"););
   
@@ -136,7 +136,7 @@ static int fcs_ocl_sort_check_index(fcs_ocl_context_t* ocl, fcs_int n, sort_key_
 }
 #endif
 
-unsigned int fcs_ocl_helper_next_power_of_2(unsigned int n) {
+size_t fcs_ocl_helper_next_power_of_2(size_t n) {
   unsigned count = 0;
 
   // already a power of 2?
@@ -151,7 +151,7 @@ unsigned int fcs_ocl_helper_next_power_of_2(unsigned int n) {
   return 1 << count;
 }
 
-unsigned int fcs_ocl_helper_prev_power_of_2(unsigned int n) {
+size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
   unsigned count = 0;
 
   // already a power of 2?
@@ -166,7 +166,7 @@ unsigned int fcs_ocl_helper_prev_power_of_2(unsigned int n) {
   return 1 << (count - 1);
 }
 
-void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, fcs_int nlocal, int offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data split\n"););
   T_START(24, "move_data");
@@ -251,7 +251,7 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, fcs_int nlocal, int of
   T_STOP(24);
 }
 
-void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, fcs_int nlocal, int offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   if(nlocal >= FCS_NEAR_OCL_SORT_MOVE_SPLIT_N) {
     fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
@@ -420,7 +420,7 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
 }
 
 
-static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // workgroup sizes
   size_t local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
@@ -434,8 +434,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_
         local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
   }
 
-  int n = (nlocal % local_size == 0)? n : nlocal + local_size - (nlocal % local_size);
-  int offset = n - nlocal;
+  size_t n = (nlocal % local_size == 0)? n : nlocal + local_size - (nlocal % local_size);
+  size_t offset = n - nlocal;
 
   // auto scale for scan (following the fomula)
   scan_size = fcs_ocl_helper_next_power_of_2(FCS_NEAR_OCL_SORT_RADIX * n) / (2 * FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
@@ -673,14 +673,14 @@ static void fcs_ocl_sort_bitonic_release(fcs_ocl_context_t *ocl) {
   }
 }
 
-static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param keys
   // use OpenCL to sort into boxes  
   
   // first get next power of two for bitonic
-  int n = fcs_ocl_helper_next_power_of_2(nlocal);
-  int offset = n - nlocal;
+  size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
+  size_t offset = n - nlocal;
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: bitonic (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, nlocal, n););
 
@@ -897,14 +897,14 @@ static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl) {
 }
 
 
-static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials, cl_mem* ext_mem_keys, cl_mem* ext_mem_index)
+static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials, cl_mem* ext_mem_keys, cl_mem* ext_mem_index)
 {
   int onlySort = ext_mem_keys != NULL;
   int onlySortNoIndex = onlySort && ext_mem_index == NULL;
 
   // bitonic sort only works for n as real power of 2
-  int n = fcs_ocl_helper_next_power_of_2(nlocal);
-  int offset = n - nlocal;
+  size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
+  size_t offset = n - nlocal;
 
   // check for very rare but problematic case
   if(n == 1)
@@ -1235,11 +1235,11 @@ static void fcs_ocl_sort_bucket_release(fcs_ocl_context_t* ocl) {
   CL_CHECK(clReleaseProgram(ocl->sort_program_bucket));
 }
 
-static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // bitonic sort only works for n as real power of 2
-  int n = fcs_ocl_helper_next_power_of_2(nlocal);
-  int offset = n - nlocal;
+  size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
+  size_t offset = n - nlocal;
 
   // params
   const unsigned int localSampleNum  = 32;
@@ -1284,7 +1284,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
 
   // step #2, sort in groups
   T_START(12, "sort_groups");
-  unsigned int workgroupSortNum;
+  size_t workgroupSortNum;
   unsigned int workgroupSortSize;
   {
     size_t local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
@@ -1480,7 +1480,6 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
 
 #if FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
     // copy over a zero element and the next biggest to the first two locations
-    int zero = 0;
     CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_samples, &zero, sizeof(zero), 0, 1 * sizeof(sort_key_t), 0, NULL, NULL));
     CL_CHECK(clEnqueueCopyBuffer(ocl->command_queue, mem_local_samples, mem_samples, 1 * sizeof(sort_key_t), 1 * sizeof(sort_key_t), 1 * sizeof(sort_key_t), 0, NULL, NULL));
 #endif // FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
@@ -1512,7 +1511,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 1, sizeof(cl_mem), &mem_samples));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 2, sizeof(cl_mem), &mem_sample_matrix_offsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 3, sizeof(cl_mem), &mem_sample_matrix_prefix));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 4, sizeof(n), &workgroupSortSize));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 4, sizeof(workgroupSortSize), &workgroupSortSize));
 
     // and run the sampler again
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #6 sample indexing\n"););
@@ -1622,7 +1621,6 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
 
     // run relocation kernels
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #8 relocate into buckets\n"););
-    int zero = 0;
 
     // go through all the buckets
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
