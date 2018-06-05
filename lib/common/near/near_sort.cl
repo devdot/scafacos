@@ -19,6 +19,10 @@ typedef void HERE_COMES_THE_CODE;
 #define swap_data(a, b) { typeof(a) tmp = a; a = b; b = tmp; }
 #endif
 
+#ifndef USE_INDEX
+#define USE_INDEX 0
+#endif
+
 // generic swap on global array
 #define swap_data_global(i, j, array) { swap_data(array[i], array[j]); }
 
@@ -55,17 +59,21 @@ static void inline swap_data_all_global(int i, int j,
         swap_data_global(i, j, potentials);
 }
 
+#if USE_INDEX
+
+__kernel void init_index(__global index_t* index) {
+    index_t i = get_global_id(0);
+    index[i] = i;
+}
+
 // one work-item per memory item
 __kernel void move_data_float(__global const index_t* data, const int offset,
     __global const fcs_float* in,
     __global fcs_float* out)
 {
-    // first apply offset to data index array
-    data += offset;
-
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut] - offset;
+    index_t indexIn = data[indexOut];
 
     // and now just write in to out
     out[indexOut] = in[indexIn];
@@ -76,11 +84,9 @@ __kernel void move_data_float_triple(__global const index_t* data, const int off
     __global const fcs_float* in,
     __global fcs_float* out)
 {
-    // first apply offset to data index array
-    data += offset;
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut] - offset;
+    index_t indexIn = data[indexOut];
 
     // adjust for triple
     indexIn *= 3;
@@ -97,12 +103,12 @@ __kernel void move_data_gridsort_index(__global const index_t* data, const int o
     __global const fcs_gridsort_index_t* in,
     __global fcs_gridsort_index_t* out)
 {
-    // first apply offset to data index array
-    data += offset;
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut] - offset;
+    index_t indexIn = data[indexOut];
 
     // and now just write in to out
     out[indexOut] = in[indexIn];
 }
+
+#endif // BITONIC_USE_INDEX

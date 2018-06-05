@@ -161,10 +161,7 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 
         // write
         keysOut[indexOut] = key;
-        if(pass == 0)
-            dataOut[indexOut] = index; // for the first pass, the "input" data index is the current index
-        else
-            dataOut[indexOut] = dataIn[index];
+        dataOut[indexOut] = dataIn[index];
 
         // and increment in the histogram
         local_histograms[shortkey * local_workitems + local_id]++;

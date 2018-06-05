@@ -3,12 +3,8 @@
 
 typedef void HERE_COMES_THE_CODE;
 
-#ifndef BITONIC_USE_INDEX
-#define BITONIC_USE_INDEX 0
-#endif
-
 __kernel void bitonic_global_2(__global key_t* key, const int stage, const int dist,
-#if BITONIC_USE_INDEX
+#if USE_INDEX
     __global index_t* data
 #else
     __global fcs_float* positions,
@@ -48,19 +44,10 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
         key[j] = keyB;
 
         // now swap the data arrays
-#if BITONIC_USE_INDEX
+#if USE_INDEX
         swap_data_global(i, j, data);
 #else
         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
 #endif
     }
 }
-
-#if BITONIC_USE_INDEX
-
-__kernel void init_index(__global index_t* index) {
-    index_t i = get_global_id(0);
-    index[i] = i;
-}
-
-#endif // BITONIC_USE_INDeX

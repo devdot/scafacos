@@ -376,6 +376,7 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
     fcs_ocl_cl,
     fcs_ocl_math_cl,
     fcs_ocl_cl_sort_config,
+    "#define USE_INDEX 1\n",
     fcs_ocl_cl_sort,
     fcs_ocl_cl_sort_radix
   };
@@ -398,6 +399,7 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
   ocl->sort_kernel_radix_scan               = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_scan", &_err));
   ocl->sort_kernel_radix_reorder            = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_reorder", &_err));
 
+  ocl->sort_kernel_init_index               = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "init_index", &_err));
   ocl->sort_kernel_move_data_float          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_float", &_err));
   ocl->sort_kernel_move_data_float_triple   = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_float_triple", &_err));
   ocl->sort_kernel_move_data_gridsort_index = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_gridsort_index", &_err));
@@ -483,6 +485,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_
   cl_mem mem_keys_swap  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_key_t), NULL, &_err));
 
   cl_mem mem_index      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
+  cl_mem mem_index_sub;
   cl_mem mem_index_swap = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
 
   cl_mem mem_histograms = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE,  sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * n, NULL, &_err));
@@ -495,6 +498,17 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_
   // fill up the front with zeros
   const int zero = 0;
   CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
+
+  {
+    // initialize the index
+    size_t global_size = n - offset;
+
+    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  }
 
   // let it finish
   CL_CHECK(clFinish(ocl->command_queue));
@@ -588,10 +602,11 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_
   CL_CHECK(clReleaseMemObject(mem_histograms_sum));
   CL_CHECK(clReleaseMemObject(mem_histograms_sum_tmp));
 
-  fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+  fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 
   // destroy remaining buffers
   CL_CHECK(clReleaseMemObject(mem_index));
+  CL_CHECK(clReleaseMemObject(mem_index_sub));
 }
 
 
@@ -602,7 +617,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key_
 static void fcs_ocl_sort_bitonic_prepare(fcs_ocl_context_t *ocl) {
   cl_int ret;
 
-  const char* bitonic_use_index = "-D BITONIC_USE_INDEX=1";
+  const char* bitonic_use_index = "-D USE_INDEX=1";
 
   // first combine program
   const char* sources[] = {
@@ -672,7 +687,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_ke
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: initializing buffers\n"););
   // then initialize memory and write to it
   cl_mem mem_keys = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_key_t), NULL, &_err));
-  cl_mem mem_index, mem_positions, mem_charges, mem_indices, mem_field, mem_potentials;
+  cl_mem mem_index, mem_index_sub, mem_positions, mem_charges, mem_indices, mem_field, mem_potentials;
   // data buffers are all read/write for swapping
   if(ocl->use_index) {
     mem_index = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
@@ -708,8 +723,12 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_ke
   }
   else {
     // initialize the index
-    size_t global_size = n;
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index));
+    size_t global_size = n - offset;
+
+    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
   }
 
@@ -776,10 +795,11 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_ke
     // release right away
     CL_CHECK(clReleaseMemObject(mem_keys));
     // and hand of to helper function
-    fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
     
     // release data index
     CL_CHECK(clReleaseMemObject(mem_index));
+    CL_CHECK(clReleaseMemObject(mem_index_sub));
   }
   else {
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positions, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
@@ -816,7 +836,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_ke
 static void fcs_ocl_sort_hybrid_prepare(fcs_ocl_context_t *ocl) {
   cl_int ret;
 
-  const char* hybrid_use_index = "-D HYBRID_USE_INDEX=1 -D BITONIC_USE_INDEX=1";
+  const char* hybrid_use_index = "-D USE_INDEX=1";
 
   // first combine program
   const char* sources[] = {
@@ -932,7 +952,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
 
   // buffers for sort
   cl_mem mem_keys;
-  cl_mem mem_index;
+  cl_mem mem_index, mem_index_sub;
   cl_mem mem_positions, mem_charges, mem_indices, mem_field, mem_potentials;
 
   if(!onlySort) {
@@ -951,8 +971,12 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
       mem_index = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
 
       // go on to initialize the index
-      size_t global_size = n;
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index));
+      size_t global_size = n - offset;
+
+      cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+      mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
     }
     else {
@@ -1123,10 +1147,11 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
     // release right away
     CL_CHECK(clReleaseMemObject(mem_keys));
     // and hand of to helper function
-    fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 
     // release remaining
     CL_CHECK(clReleaseMemObject(mem_index));
+    CL_CHECK(clReleaseMemObject(mem_index_sub));
   }
   else {
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positions, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
@@ -1228,6 +1253,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
   T_START(11, "write_buffers");
   cl_mem mem_keys  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_key_t), NULL, &_err));
   cl_mem mem_index  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
+  cl_mem mem_index_sub;
 
   // now write
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_keys, CL_FALSE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
@@ -1236,10 +1262,15 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
   CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
 
   // initialize the index
-  size_t _global_size = n;
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index));
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &_global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  {
+    size_t global_size = n - offset;
 
+    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+  }
   // let it all finish
   CL_CHECK(clFinish(ocl->command_queue));
   T_STOP(11);
@@ -1698,10 +1729,11 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, fcs_int nlocal, sort_key
   free(mems_bucket_index);
 
   // final act, move the data
-  fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+  fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 
   // release remaining
   CL_CHECK(clReleaseMemObject(mem_index));
+  CL_CHECK(clReleaseMemObject(mem_index_sub));
 }
 
 /*
