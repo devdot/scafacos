@@ -503,7 +503,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     // initialize the index
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -725,7 +725,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
     // initialize the index
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -973,7 +973,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       // go on to initialize the index
       size_t global_size = n - offset;
 
-      cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+      cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
       mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -1265,7 +1265,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   {
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -1333,9 +1333,10 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: leave out %d offset groups\n", offsetWorkgroupNum););
 
     // make smaller subbuffers
-    cl_buffer_region region = {offsetWorkgroupTotal * sizeof(sort_key_t), (n - offsetWorkgroupTotal) * sizeof(sort_key_t)};
-    cl_mem mem_keys_sub   = CL_CHECK_ERR(clCreateSubBuffer(mem_keys,  CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
-    cl_mem mem_index_sub  = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+    cl_buffer_region region_keys  = {offsetWorkgroupTotal * sizeof(sort_key_t), (n - offsetWorkgroupTotal) * sizeof(sort_key_t)};
+    cl_buffer_region region_index = {offsetWorkgroupTotal * sizeof(sort_index_t), (n - offsetWorkgroupTotal) * sizeof(sort_index_t)};
+    cl_mem mem_keys_sub   = CL_CHECK_ERR(clCreateSubBuffer(mem_keys,  CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region_keys, &_err));
+    cl_mem mem_index_sub  = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region_index, &_err));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mem_keys_sub));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mem_index_sub));
 #else
