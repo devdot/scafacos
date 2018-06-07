@@ -33,7 +33,8 @@ extern "C" {
  */
 
 #define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0
-#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 16 // 2^24, only when moving data on gpu
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO     1
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 32 // 2^25, only when moving data on gpu
 #define FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL    1
 
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0

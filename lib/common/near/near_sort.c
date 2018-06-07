@@ -166,8 +166,6 @@ size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
   return 1 << (count - 1);
 }
 
-#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST
-
 #define MOVE_DATA(array, index, _n) {\
     typeof(array) tmp = malloc(sizeof(array[0]) * _n);\
     for(int i = 0; i < _n; i++)\
@@ -186,7 +184,7 @@ size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
     free(tmp);\
   };
 
-void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data on host, splitted\n"););
   T_START(24, "move_data");
@@ -221,7 +219,11 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
 #undef MOVE_DATA
 #undef MOVE_DATA_TRIPLE
 
-#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST
+#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#define fcs_ocl_sort_move_data fcs_ocl_sort_move_data_host
+#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+
+
 void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data split\n"););
@@ -309,10 +311,50 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
 
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+#if FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+  // calculate where the data can be moved based on global size
+  size_t buffer_size;
+  // use the index buffer as reference of actual size on device
+  clGetMemObjectInfo(mem_index, CL_MEM_SIZE, sizeof(buffer_size), &buffer_size, NULL);
+  const size_t buffer_elements    = buffer_size / sizeof(sort_index_t);
+  const size_t sizeof_index       = sizeof(sort_index_t);
+  const size_t sizeof_data_triple = 3 * sizeof(fcs_float); // triple is the biggest single data type
+
+  size_t sizeof_data_all = sizeof(fcs_gridsort_index_t) + sizeof(fcs_float) + sizeof_data_triple; // positions, charge, gridsort index
+  if(field != NULL)
+    sizeof_data_all += sizeof_data_triple;
+  if(potentials != NULL)
+    sizeof_data_all += sizeof(fcs_float);
+  
+  const size_t size_all   = (sizeof_index + sizeof_data_all) * buffer_elements;
+  const size_t size_split = (sizeof_index + sizeof_data_triple) * buffer_elements;
+
+  INFO_CMD(
+    printf(INFO_PRINT_PREFIX "ocl-sort: move data auto\n");
+    printf(INFO_PRINT_PREFIX "ocl-sort: %lld B per index, %lld B per triple, %lld B per all\n", sizeof_index, sizeof_data_triple, sizeof_data_all);
+    printf(INFO_PRINT_PREFIX "ocl-sort: %f MB global mem, %f MB for index buffer, %f MB split, %f MB all\n", ocl->global_memory / 1048576.f, buffer_size / 1048576.f, size_split / 1048576.f, size_all / 1048576.f);
+  );
+
+  // go for half as that seems to work very well with on-device offcuts
+  if(size_all > ocl->global_memory / 2) {
+    if(size_split > ocl->global_memory / 2) {
+      // won't fit on device at all
+      fcs_ocl_sort_move_data_host(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    }
+    else {
+      // fits on device one-by-one
+      fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    }
+    return;
+  }
+  // fits all into global memory!
+
+#else // FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
   if(nlocal >= FCS_NEAR_OCL_SORT_MOVE_SPLIT_N) {
     fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
     return;
   }
+#endif
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data\n"););
   T_START(24, "move_data");

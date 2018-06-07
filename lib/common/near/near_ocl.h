@@ -85,6 +85,7 @@ typedef struct
 
   cl_device_id device_id;
 
+  cl_ulong global_memory;
   cl_ulong local_memory;
 
   cl_program sort_program_bitonic;
