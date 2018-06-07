@@ -676,7 +676,7 @@ static void fcs_ocl_sort_bitonic_release(fcs_ocl_context_t *ocl) {
 static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param keys
-  // use OpenCL to sort into boxes  
+  // use OpenCL to sort into boxes
   
   // first get next power of two for bitonic
   size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
@@ -1805,7 +1805,7 @@ void fcs_ocl_sort(fcs_near_t* near) {
   fcs_ocl_sort_check(near->nparticles, near->context->real_boxes);
 #endif
 
-  // check for ghost boxed
+  // check for ghost boxes
   if(near->context->ghost_boxes) {
     ocl->_timing = ocl->timing_ghost;
     T_START(3, "sum_sort");
