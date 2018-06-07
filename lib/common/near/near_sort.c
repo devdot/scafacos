@@ -166,6 +166,62 @@ size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
   return 1 << (count - 1);
 }
 
+#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST
+
+#define MOVE_DATA(array, index, _n) {\
+    typeof(array) tmp = malloc(sizeof(array[0]) * _n);\
+    for(int i = 0; i < _n; i++)\
+      tmp[i] = array[index[i]];\
+    memcpy(array, tmp, sizeof(array[0]) * _n);\
+    free(tmp);\
+  };
+#define MOVE_DATA_TRIPLE(array, index, _n) {\
+    typeof(array) tmp = malloc(sizeof(array[0]) * _n * 3);\
+    for(int i = 0; i < _n; i++) {\
+      tmp[i * 3 + 0] = array[index[i] * 3 + 0];\
+      tmp[i * 3 + 1] = array[index[i] * 3 + 1];\
+      tmp[i * 3 + 2] = array[index[i] * 3 + 2];\
+    }\
+    memcpy(array, tmp, sizeof(array[0]) * _n * 3);\
+    free(tmp);\
+  };
+
+void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+{
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data on host, splitted\n"););
+  T_START(24, "move_data");
+
+  // create an array for index on host
+  sort_index_t* index = malloc(nlocal * sizeof(sort_index_t));
+
+  // read back the index
+  T_START(43, "move_data_read");
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_index, CL_TRUE, 0, nlocal * sizeof(sort_index_t), index, 0, NULL, NULL));
+  T_STOP(43);
+
+  // now just move
+  T_START(42, "move_data_move");
+
+  MOVE_DATA_TRIPLE(positions, index, nlocal);
+  MOVE_DATA(charges, index, nlocal);
+  MOVE_DATA(indices, index, nlocal);
+  if(field != NULL)
+    MOVE_DATA_TRIPLE(field, index, nlocal);
+  if(potentials != NULL)
+    MOVE_DATA(potentials, index, nlocal);
+
+  T_STOP(42);
+
+  // free our resources
+  free(index);
+
+  T_STOP(24);
+}
+
+#undef MOVE_DATA
+#undef MOVE_DATA_TRIPLE
+
+#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST
 void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data split\n"););
@@ -361,6 +417,7 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
   
   T_STOP(24);
 }
+#endif // FCS_NEAR_OCL_SORT_MOVE_ON_HOST
 
 
 /*
