@@ -995,6 +995,99 @@ static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl) {
   }
 }
 
+// assumes buffers to be set for kernels
+// only sets following kernel args:
+//    bitonic_local:    4 (stage)
+//                      6 (sortOnGlobalFactor)
+//    bitonic_global_2: 1 (stage)
+//                      2 (dist)
+static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_queue* queue, const size_t n, const size_t global_size_local, const size_t local_size_local, const size_t workgroupElementsNum, const int wait_timing) {
+  unsigned int stage = 1;
+  unsigned int sortOnGlobalFactor = 1;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+  
+  // run first groups
+  CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, NULL));
+  
+  if(wait_timing) {
+    // let everything finish first for timing
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
+    T_KERNEL(41, ocl->sort_kernel_completion, "bitonic_local_pre");
+  }
+
+  int minDist = workgroupElementsNum / 2;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
+
+  const size_t global_size_global = n / 2;
+
+  // main loop of bitonic hybrid
+  for(stage = workgroupElementsNum; stage < n; stage *= 2) {
+    // set stage argument for global kernel
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
+
+    for(unsigned int dist = stage; dist > minDist; dist /= 2) {
+      // set kernel argument for dist
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
+
+      // and finally run the kernel
+      CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, NULL));
+      if(wait_timing) {
+        CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+        T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
+      }
+    }
+
+    // now it's small enough to use the local kernel
+    // increse sort on global factor to simulate a sorting of a higher stage
+    sortOnGlobalFactor *= 2;
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+    // run the local kernel
+    CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, NULL));
+    if(wait_timing) {
+      CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+      T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_local");
+    }
+  }
+}
+
+static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int use_index, const size_t n, size_t* local_size_local, size_t* bytesPerElement, int* quota, int* workgroupElementsNum) {
+  *local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+  *bytesPerElement = sizeof(sort_key_t);
+#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
+  if(use_index)
+    *bytesPerElement += sizeof(sort_index_t);
+#endif
+  
+  *quota = ocl->local_memory / (*local_size_local * *bytesPerElement);
+  *quota = fcs_ocl_helper_prev_power_of_2(*quota);
+
+  while (n / (4 * *quota) < *local_size_local && *local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
+    // we need to adjust and make smaller groups
+    *local_size_local /= 2;
+  }
+
+  // run lower
+  while(n / *quota < *local_size_local && *quota > 2) {
+    *quota /= 2;
+  }
+  while(n / *quota < *local_size_local) {
+    *local_size_local /= 2;
+  }
+  if(*local_size_local < 0) {
+    printf("local_size_local too small!\n");
+    abort();
+  }
+
+
+  // check if the planned size was not met
+  if(*quota == 0) {
+    *quota = 1;
+    *local_size_local = fcs_ocl_helper_next_power_of_2((ocl->local_memory / *bytesPerElement) / 2);
+  }
+
+  *workgroupElementsNum = *quota * *local_size_local;
+}
 
 static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials, cl_mem* ext_mem_keys, cl_mem* ext_mem_index)
 {
@@ -1010,41 +1103,11 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     return;
 
   // calculate parameters
-  size_t local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
-  size_t bytesPerElement = sizeof(sort_key_t);
-#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
-  if(ocl->use_index || onlySort)
-    bytesPerElement += sizeof(sort_index_t);
-#endif
-  
-  int quota = ocl->local_memory / (local_size_local * bytesPerElement);
-  quota = fcs_ocl_helper_prev_power_of_2(quota);
-
-  while (n / (2 * quota) < local_size_local && local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
-    // we need to adjust and make smaller groups
-    local_size_local /= 2;
-  }
-
-  // run lower
-  while(n / quota < local_size_local && quota > 2) {
-    quota /= 2;
-  }
-  while(n / quota < local_size_local) {
-    local_size_local /= 2;
-  }
-  if(local_size_local < 0) {
-    printf("local_size_local too small!\n");
-    abort();
-  }
-
-
-  // check if the planned size was not met
-  if(quota == 0) {
-    quota = 1;
-    local_size_local = fcs_ocl_helper_next_power_of_2((ocl->local_memory / bytesPerElement) / 2);
-  }
-
-  const int workgroupElementsNum = quota * local_size_local;
+  size_t local_size_local;
+  size_t bytesPerElement;
+  unsigned int quota;
+  unsigned int workgroupElementsNum;
+  fcs_ocl_sort_hybrid_params(ocl, (ocl->use_index || onlySort), n, &local_size_local, &bytesPerElement, &quota, &workgroupElementsNum);
 
   size_t global_size_local = n / quota;
   const size_t global_size_global = n/2;
@@ -1126,18 +1189,14 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   }
 
   // set kernel arguments for bitonic local
-  int stage = 1;
   int sortOnGlobal = 1; // true
-  int sortOnGlobalFactor = 1;
   int desc = 0;
-  int startStage = 1;
+  // core takes care of params 4 and 6
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mem_keys));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupElementsNum * sizeof(sort_key_t), NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
   if(ocl->use_index) {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mem_index));
 #if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
@@ -1159,6 +1218,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   }
 
   // set kernel arguments for bitonic global
+  // args 1 and 2 are taken care of in core
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mem_keys));
   if(ocl->use_index) {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mem_index));
@@ -1177,52 +1237,24 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), NULL));
   }
 
-  // run the first set! (local kernel)
+  // run
   INFO_CMD(
     if(!onlySort)
       printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n");
   );
+#ifdef DO_TIMING
+  const int do_timing = 1;
+#else
+  const int do_timing = 0;
+#endif
+  
   T_START(22, "sort");
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
+  // hand of to core
+  fcs_ocl_sort_hybrid_core(ocl, &ocl->command_queue, n, global_size_local, local_size_local, workgroupElementsNum, do_timing);
 
-  // set argument for local kernel, will always start in the stage of minDist
-  int minDist = workgroupElementsNum / 2;
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
-
-  // let everything finish first for timing
-  CL_CHECK(T_CL_FINISH(ocl->command_queue));
-  T_KERNEL(41, ocl->sort_kernel_completion, "bitonic_local_pre");
-
-  // main loop of bitonic hybrid sort
-  for(stage = workgroupElementsNum; stage < n; stage *= 2) {
-    // set stage argument for global kernel
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
-
-    for(unsigned int dist = stage; dist > minDist; dist /= 2) {
-      // set kernel argument for dist
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
-
-      // and finally run the kernel
-      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
-      T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
-    }
-
-    // now it's small enough to use the local kernel
-    // increse sort on global factor to simulate a sorting of a higher stage
-    sortOnGlobalFactor *= 2;
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
-    // run the local kernel
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
-    T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_local");
-  }
   // let it all finally wait
   CL_CHECK(clFinish(ocl->command_queue));
-
   T_STOP(22);
-
-  // the magic is already done
 
   // check if we're only sorting
   if(onlySort) {
@@ -1232,8 +1264,6 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     }
     return;
   }
-
-  //fcs_ocl_sort_check_index(ocl, nlocal, keys, offset, &mem_keys, &mem_index);
 
   // read back the results
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: reading back\n"););
@@ -1387,29 +1417,13 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   size_t workgroupSortNum;
   unsigned int workgroupSortSize;
   {
-    size_t local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+    size_t local_size;
+    size_t bytesPerElement;
+    unsigned int quota;
 
-    // size of elements in local memory, depending on buffering of index in local memory
-#if FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
-    const size_t bytesPerElement = sizeof(sort_key_t);
-#else
-    const size_t bytesPerElement = sizeof(sort_key_t) + sizeof(sort_index_t);
-#endif
-
-    unsigned int quota = fcs_ocl_helper_prev_power_of_2(ocl->local_memory / (local_size * bytesPerElement));
-
-    while (n / (4 * quota) < local_size && local_size > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
-      // we need to adjust and make smaller groups
-      local_size /= 2;
-    }
-    // check for invalid quota
-    if(quota == 0) {
-      quota = 1;
-      local_size = fcs_ocl_helper_next_power_of_2((ocl->local_memory / bytesPerElement) / 2);
-    }
-
-    // size of the groups
-    workgroupSortSize = quota * local_size;
+    // get params
+    fcs_ocl_sort_hybrid_params(ocl, 1, n, &local_size, &bytesPerElement, &quota, &workgroupSortSize);
+    
     size_t global_size = n / quota;
     workgroupSortNum = global_size / local_size;
 
@@ -1757,14 +1771,70 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   CL_CHECK(clReleaseMemObject(mem_keys));
 
   // step #9 sort the buckets
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #9 sort buckets\n"););
+  INFO_CMD(
+    printf(INFO_PRINT_PREFIX "ocl-bucket: #9 sort buckets\n");
+#if FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
+    printf(INFO_PRINT_PREFIX "ocl-bucket: use multiqueue\n");
+#endif
+  );
   T_START(19, "sort_buckets");
   {
+#if FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
+    // array for all the new queues
+    cl_command_queue* queues = malloc(globalSampleNum * sizeof(cl_command_queue));
+
+    // set general arguments
+    int sortOnGlobal = 1; // true
+    int desc = 0;
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
+
+    for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
+      if(bucketContainers[i] == 0)
+        continue;
+      
+      // create a new queue
+      queues[i] = CL_CHECK_ERR(clCreateCommandQueue(ocl->context, ocl->device_id, 0, &_err));
+
+      // get args for each bucket
+      const size_t n = bucketContainers[i];
+      size_t local_size;
+      size_t bytesPerElement;
+      unsigned int quota;
+      unsigned int workgroupSortSize;
+
+      // get params
+      fcs_ocl_sort_hybrid_params(ocl, 1, n, &local_size, &bytesPerElement, &quota, &workgroupSortSize);
+      const size_t global_size = n / quota;
+
+      // set bucket-specific args
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupSortSize * sizeof(sort_key_t), NULL));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mems_bucket_index[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mems_bucket_index[i]));
+
+      // run the hybrid core, non-blocking
+      fcs_ocl_sort_hybrid_core(ocl, &queues[i], n, global_size, local_size, workgroupSortSize, 0);
+    }
+
+    // wait and let go of the queues
+    for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
+      if(bucketContainers[i] == 0)
+        continue;
+
+      CL_CHECK(clFinish(queues[i]));
+      CL_CHECK(clReleaseCommandQueue(queues[i]));
+    }
+    free(queues);
+#else
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
       if(bucketContainers[i] == 0)
         continue;
       fcs_ocl_sort_hybrid(ocl, bucketContainers[i], NULL, NULL, NULL, NULL, NULL, NULL, &mems_bucket_keys[i], &mems_bucket_index[i]);
     }
+#endif // FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
   } // end step 
   T_STOP(19);
 

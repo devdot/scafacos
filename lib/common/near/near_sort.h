@@ -51,6 +51,7 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
 
 // configuration for bucket sort
+#define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE      1
 // set only either to true
 #define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES    0
 #define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET 1
