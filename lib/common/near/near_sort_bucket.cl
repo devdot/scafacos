@@ -109,7 +109,7 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	while(container < row[i])
 		container <<= 1;
 
-	// fix 0 size buckets (should not happen to much though because that kills performance)
+	// fix 0 size buckets (should not happen too much though because that kills performance)
 	if(row[i] == 0)
 		container = 0;
 
