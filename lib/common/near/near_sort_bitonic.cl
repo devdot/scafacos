@@ -45,7 +45,7 @@ __kernel void bitonic_global_2(__global key_t* key, const int stage, const int d
 
         // now swap the data arrays
 #if USE_INDEX
-        swap_data_global(i, j, data);
+        swap_data_index(i, j, data);
 #else
         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
 #endif

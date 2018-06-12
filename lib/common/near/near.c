@@ -809,6 +809,7 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
 
   // query local memory size
   clGetDeviceInfo(device_id, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(ocl->local_memory), &ocl->local_memory, NULL);
+  clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(ocl->global_memory), &ocl->global_memory, NULL);
 #endif
 
   cl_int ret;

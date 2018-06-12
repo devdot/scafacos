@@ -29,15 +29,21 @@ typedef box_t sort_key_t;
 
 #ifdef DO_TIMING
 
+#define T_CL_FINISH(queue) clFinish(queue);
+#define T_CL_WAIT_EVENT(n, event) clWaitForEvents(n, event);
+
 #define T_START(index, str) { ocl->timing_names[index] = str; TIMING_START(ocl->_timing[index]); }
 #define T_STOP(index) { TIMING_STOP(ocl->_timing[index]); }
 #define T_KERNEL(index, event, str) { if(ocl->_timing[index] < 0.f) ocl->_timing[index] = 0.f; ocl->timing_names[index] = "kernel_" str; cl_ulong start, end; CL_CHECK(clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL)); CL_CHECK(clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL)); ocl->_timing[index] += ((double)(end - start)) / 1000000000.f;}
 
 #else
 
-#define T_START(index, str) {};
-#define T_END(index) {};
-#define T_KERNEL(index, event, str) {};
+#define T_CL_FINISH(queue) CL_SUCCESS
+#define T_CL_WAIT_EVENT(n, event) CL_SUCCESS
+
+#define T_START(index, str)
+#define T_STOP(index)
+#define T_KERNEL(index, event, str)
 
 #endif // DO_TIMING
 
@@ -167,6 +173,64 @@ size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
   return 1 << (count - 1);
 }
 
+#define MOVE_DATA(array, index, _n) {\
+    typeof(array) tmp = malloc(sizeof(array[0]) * _n);\
+    for(int i = 0; i < _n; i++)\
+      tmp[i] = array[index[i]];\
+    memcpy(array, tmp, sizeof(array[0]) * _n);\
+    free(tmp);\
+  };
+#define MOVE_DATA_TRIPLE(array, index, _n) {\
+    typeof(array) tmp = malloc(sizeof(array[0]) * _n * 3);\
+    for(int i = 0; i < _n; i++) {\
+      tmp[i * 3 + 0] = array[index[i] * 3 + 0];\
+      tmp[i * 3 + 1] = array[index[i] * 3 + 1];\
+      tmp[i * 3 + 2] = array[index[i] * 3 + 2];\
+    }\
+    memcpy(array, tmp, sizeof(array[0]) * _n * 3);\
+    free(tmp);\
+  };
+
+void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
+{
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data on host, splitted\n"););
+  T_START(24, "move_data");
+
+  // create an array for index on host
+  sort_index_t* index = malloc(nlocal * sizeof(sort_index_t));
+
+  // read back the index
+  T_START(43, "move_data_read");
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_index, CL_TRUE, 0, nlocal * sizeof(sort_index_t), index, 0, NULL, NULL));
+  T_STOP(43);
+
+  // now just move
+  T_START(42, "move_data_move");
+
+  MOVE_DATA_TRIPLE(positions, index, nlocal);
+  MOVE_DATA(charges, index, nlocal);
+  MOVE_DATA(indices, index, nlocal);
+  if(field != NULL)
+    MOVE_DATA_TRIPLE(field, index, nlocal);
+  if(potentials != NULL)
+    MOVE_DATA(potentials, index, nlocal);
+
+  T_STOP(42);
+
+  // free our resources
+  free(index);
+
+  T_STOP(24);
+}
+
+#undef MOVE_DATA
+#undef MOVE_DATA_TRIPLE
+
+#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#define fcs_ocl_sort_move_data fcs_ocl_sort_move_data_host
+#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+
+
 void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data split\n"););
@@ -186,11 +250,10 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   // positions
   cl_mem mem_positionsIn  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
   cl_mem mem_positionsOut = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_positionsIn, CL_TRUE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_positionsIn, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 2, sizeof(cl_mem), &mem_positionsIn));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 3, sizeof(cl_mem), &mem_positionsOut));
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float_triple, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
-  CL_CHECK(clFinish(ocl->command_queue));
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positionsOut, CL_TRUE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
   CL_CHECK(clReleaseMemObject(mem_positionsIn));
   CL_CHECK(clReleaseMemObject(mem_positionsOut));
@@ -198,11 +261,10 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   // charges
   cl_mem mem_chargesIn    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_float), NULL, &_err));
   cl_mem mem_chargesOut   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_float), NULL, &_err));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_chargesIn, CL_TRUE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_chargesIn, CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 2, sizeof(cl_mem), &mem_chargesIn));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 3, sizeof(cl_mem), &mem_chargesOut));
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
-  CL_CHECK(clFinish(ocl->command_queue));
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_chargesOut, CL_TRUE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
   CL_CHECK(clReleaseMemObject(mem_chargesIn));
   CL_CHECK(clReleaseMemObject(mem_chargesOut));
@@ -210,13 +272,12 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   // indices
   cl_mem mem_indicesIn   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_gridsort_index_t), NULL, &_err));
   cl_mem mem_indicesOut  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_gridsort_index_t), NULL, &_err));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_indicesIn, CL_TRUE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_indicesIn, CL_FALSE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 0, sizeof(cl_mem), &mem_index));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 1, sizeof(int), &offset));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 2, sizeof(cl_mem), &mem_indicesIn));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_gridsort_index, 3, sizeof(cl_mem), &mem_indicesOut));
   CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_gridsort_index, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
-  CL_CHECK(clFinish(ocl->command_queue));
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_indicesOut, CL_TRUE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
   CL_CHECK(clReleaseMemObject(mem_indicesIn));
   CL_CHECK(clReleaseMemObject(mem_indicesOut));
@@ -225,11 +286,10 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   if(field != NULL) {
     cl_mem mem_fieldIn   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
     cl_mem mem_fieldOut  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * 3 * sizeof(fcs_float), NULL, &_err));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_fieldIn, CL_TRUE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_fieldIn, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 2, sizeof(cl_mem), &mem_fieldIn));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float_triple, 3, sizeof(cl_mem), &mem_fieldOut));
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float_triple, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_fieldOut, CL_TRUE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
     CL_CHECK(clReleaseMemObject(mem_fieldIn));
     CL_CHECK(clReleaseMemObject(mem_fieldOut));
@@ -239,11 +299,10 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   if(potentials != NULL) {
     cl_mem mem_potentialsIn  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY, nlocal * sizeof(fcs_float), NULL, &_err));
     cl_mem mem_potentialsOut = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, nlocal * sizeof(fcs_float), NULL, &_err));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_potentialsIn, CL_TRUE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_potentialsIn, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 2, sizeof(cl_mem), &mem_potentialsIn));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_move_data_float, 3, sizeof(cl_mem), &mem_potentialsOut));
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_move_data_float, 1, NULL, &global_size_move_data, NULL, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_potentialsOut, CL_TRUE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
     CL_CHECK(clReleaseMemObject(mem_potentialsIn));
     CL_CHECK(clReleaseMemObject(mem_potentialsOut));
@@ -254,10 +313,50 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
 
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+#if FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+  // calculate where the data can be moved based on global size
+  size_t buffer_size;
+  // use the index buffer as reference of actual size on device
+  clGetMemObjectInfo(mem_index, CL_MEM_SIZE, sizeof(buffer_size), &buffer_size, NULL);
+  const size_t buffer_elements    = buffer_size / sizeof(sort_index_t);
+  const size_t sizeof_index       = sizeof(sort_index_t);
+  const size_t sizeof_data_triple = 3 * sizeof(fcs_float); // triple is the biggest single data type
+
+  size_t sizeof_data_all = sizeof(fcs_gridsort_index_t) + sizeof(fcs_float) + sizeof_data_triple; // positions, charge, gridsort index
+  if(field != NULL)
+    sizeof_data_all += sizeof_data_triple;
+  if(potentials != NULL)
+    sizeof_data_all += sizeof(fcs_float);
+  
+  const size_t size_all   = (sizeof_index + sizeof_data_all) * buffer_elements;
+  const size_t size_split = (sizeof_index + sizeof_data_triple) * buffer_elements;
+
+  INFO_CMD(
+    printf(INFO_PRINT_PREFIX "ocl-sort: move data auto\n");
+    printf(INFO_PRINT_PREFIX "ocl-sort: %lld B per index, %lld B per triple, %lld B per all\n", sizeof_index, sizeof_data_triple, sizeof_data_all);
+    printf(INFO_PRINT_PREFIX "ocl-sort: %f MB global mem, %f MB for index buffer, %f MB split, %f MB all\n", ocl->global_memory / 1048576.f, buffer_size / 1048576.f, size_split / 1048576.f, size_all / 1048576.f);
+  );
+
+  // go for half as that seems to work very well with on-device offcuts
+  if(size_all > ocl->global_memory / 2) {
+    if(size_split > ocl->global_memory / 2) {
+      // won't fit on device at all
+      fcs_ocl_sort_move_data_host(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    }
+    else {
+      // fits on device one-by-one
+      fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
+    }
+    return;
+  }
+  // fits all into global memory!
+
+#else // FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
   if(nlocal >= FCS_NEAR_OCL_SORT_MOVE_SPLIT_N) {
     fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
     return;
   }
+#endif
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data\n"););
   T_START(24, "move_data");
@@ -362,6 +461,7 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
   
   T_STOP(24);
 }
+#endif // FCS_NEAR_OCL_SORT_MOVE_ON_HOST
 
 
 /*
@@ -525,15 +625,15 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     // initialize the index
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
   }
 
-  // let it finish
-  CL_CHECK(clFinish(ocl->command_queue));
+  // let it finish for timing
+  CL_CHECK(T_CL_FINISH(ocl->command_queue));
   T_STOP(21);
 
   // set kernel arguments
@@ -566,7 +666,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 3, sizeof(int), &pass));
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_histogram, 1, NULL, &global_size_histogram, &local_size_histogram, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(41, ocl->sort_kernel_completion, "radix_histrogram");
 
     // 2. scan histogram
@@ -574,7 +674,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 2, sizeof(cl_mem), &mem_histograms_sum));
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_scan, 1, NULL, &global_size_scan, &local_size_scan, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(42, ocl->sort_kernel_completion, "radix_scan");
 
     // second scan on histogram_sum
@@ -585,15 +685,14 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan, 0, sizeof(cl_mem), &mem_histograms_sum));
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_scan, 1, NULL, &global_size_scan2, &local_size_scan2, 0, NULL, &ocl->sort_kernel_completion));
-
 #endif // FCS_NEAR_OCL_SORT_RADIX_SCALE
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(43, ocl->sort_kernel_completion, "radix_scan2");
     printf("finished\n");
 
     // 3. paste histograms
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_histogram_paste, 1, NULL, &global_size_histogram_paste, &local_size_histogram_paste, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(44, ocl->sort_kernel_completion, "radix_histrogram_paste");
 
     // 4. reorder
@@ -604,7 +703,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 6, sizeof(int), &pass));
 
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_reorder, 1, NULL, &global_size_reorder, &local_size_reorder, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(45, ocl->sort_kernel_completion, "radix_reorder");
 
     // swap the swap buffers
@@ -615,12 +714,13 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     mem_index = mem_index_swap;
     mem_index_swap = mem_tmp;
   }
+  // let the whole radix sort finish up
+  CL_CHECK(clFinish(ocl->command_queue));
   T_STOP(22);
 
   // read back keys
   T_START(23, "read_keys");
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_FALSE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
-  CL_CHECK(clFinish(ocl->command_queue));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_keys, CL_TRUE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
   T_STOP(23);
 
 
@@ -710,7 +810,7 @@ static void fcs_ocl_sort_bitonic_release(fcs_ocl_context_t *ocl) {
 static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param keys
-  // use OpenCL to sort into boxes  
+  // use OpenCL to sort into boxes
   
   // first get next power of two for bitonic
   size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
@@ -759,7 +859,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
     // initialize the index
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -767,8 +867,9 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
   }
 
   // wait for everything to be finished before continuing to work on the data
-  CL_CHECK(clFinish(ocl->command_queue));
+  CL_CHECK(T_CL_FINISH(ocl->command_queue));
   T_STOP(21);
+
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: bitonic\n"););
 
   // set kernel arguments
@@ -805,15 +906,12 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
 
       // and finally run the kernel
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_work_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
-      CL_CHECK(clFinish(ocl->command_queue));
+      CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
       T_KERNEL(41, ocl->sort_kernel_completion, "bitonic_global_2");
     }
   }
 
   // wait for the sort to finish
-  CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
-  CL_CHECK(clReleaseEvent(ocl->sort_kernel_completion));
   CL_CHECK(clFinish(ocl->command_queue));
   T_STOP(22);
 
@@ -930,6 +1028,103 @@ static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl) {
   }
 }
 
+// assumes buffers to be set for kernels
+// only sets following kernel args:
+//    bitonic_local:    4 (stage)
+//                      6 (sortOnGlobalFactor)
+//    bitonic_global_2: 1 (stage)
+//                      2 (dist)
+static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_queue* queue, const size_t n, const size_t global_size_local, const size_t local_size_local, const size_t workgroupElementsNum, const int wait_timing) {
+  unsigned int stage = 1;
+  unsigned int sortOnGlobalFactor = 1;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+  
+  cl_event* event = NULL;
+  if(wait_timing)
+    event = &ocl->sort_kernel_completion;
+
+  // run first groups
+  CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, event));
+  
+  if(wait_timing) {
+    // let everything finish first for timing
+    CL_CHECK(T_CL_FINISH(*queue));
+    T_KERNEL(41, ocl->sort_kernel_completion, "bitonic_local_pre");
+  }
+
+  int minDist = workgroupElementsNum / 2;
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
+
+  const size_t global_size_global = n / 2;
+
+  // main loop of bitonic hybrid
+  for(stage = workgroupElementsNum; stage < n; stage *= 2) {
+    // set stage argument for global kernel
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
+
+    for(unsigned int dist = stage; dist > minDist; dist /= 2) {
+      // set kernel argument for dist
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
+
+      // and finally run the kernel
+      CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, event));
+      if(wait_timing) {
+        CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+        T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
+      }
+    }
+
+    // now it's small enough to use the local kernel
+    // increse sort on global factor to simulate a sorting of a higher stage
+    sortOnGlobalFactor *= 2;
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
+    // run the local kernel
+    CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, event));
+    if(wait_timing) {
+      CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+      T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_local");
+    }
+  }
+}
+
+static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int use_index, const size_t n, size_t* local_size_local, size_t* bytesPerElement, int* quota, int* workgroupElementsNum) {
+  *local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+  *bytesPerElement = sizeof(sort_key_t);
+#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
+  if(use_index)
+    *bytesPerElement += sizeof(sort_index_t);
+#endif
+  
+  *quota = ocl->local_memory / (*local_size_local * *bytesPerElement);
+  *quota = fcs_ocl_helper_prev_power_of_2(*quota);
+
+  while (n / (4 * *quota) < *local_size_local && *local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
+    // we need to adjust and make smaller groups
+    *local_size_local /= 2;
+  }
+
+  // run lower
+  while(n / *quota < *local_size_local && *quota > 2) {
+    *quota /= 2;
+  }
+  while(n / *quota < *local_size_local) {
+    *local_size_local /= 2;
+  }
+  if(*local_size_local < 0) {
+    printf("local_size_local too small!\n");
+    abort();
+  }
+
+
+  // check if the planned size was not met
+  if(*quota == 0) {
+    *quota = 1;
+    *local_size_local = fcs_ocl_helper_next_power_of_2((ocl->local_memory / *bytesPerElement) / 2);
+  }
+
+  *workgroupElementsNum = *quota * *local_size_local;
+}
 
 static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials, cl_mem* ext_mem_keys, cl_mem* ext_mem_index)
 {
@@ -945,41 +1140,11 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     return;
 
   // calculate parameters
-  size_t local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
-  size_t bytesPerElement = sizeof(sort_key_t);
-#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
-  if(ocl->use_index || onlySort)
-    bytesPerElement += sizeof(sort_index_t);
-#endif
-  
-  int quota = ocl->local_memory / (local_size_local * bytesPerElement);
-  quota = fcs_ocl_helper_prev_power_of_2(quota);
-
-  while (n / (2 * quota) < local_size_local && local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
-    // we need to adjust and make smaller groups
-    local_size_local /= 2;
-  }
-
-  // run lower
-  while(n / quota < local_size_local && quota > 2) {
-    quota /= 2;
-  }
-  while(n / quota < local_size_local) {
-    local_size_local /= 2;
-  }
-  if(local_size_local < 0) {
-    printf("local_size_local too small!\n");
-    abort();
-  }
-
-
-  // check if the planned size was not met
-  if(quota == 0) {
-    quota = 1;
-    local_size_local = fcs_ocl_helper_next_power_of_2((ocl->local_memory / bytesPerElement) / 2);
-  }
-
-  const int workgroupElementsNum = quota * local_size_local;
+  size_t local_size_local;
+  size_t bytesPerElement;
+  unsigned int quota;
+  unsigned int workgroupElementsNum;
+  fcs_ocl_sort_hybrid_params(ocl, (ocl->use_index || onlySort), n, &local_size_local, &bytesPerElement, &quota, &workgroupElementsNum);
 
   size_t global_size_local = n / quota;
   const size_t global_size_global = n/2;
@@ -1007,7 +1172,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       // go on to initialize the index
       size_t global_size = n - offset;
 
-      cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+      cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
       mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -1042,8 +1207,8 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
         CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
     }
 
-    // wait for everything to be finished before continuing to work on the data
-    CL_CHECK(clFinish(ocl->command_queue));
+    // wait for timing
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_STOP(21);
   } // !onlySort
   else {
@@ -1061,18 +1226,14 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   }
 
   // set kernel arguments for bitonic local
-  int stage = 1;
   int sortOnGlobal = 1; // true
-  int sortOnGlobalFactor = 1;
   int desc = 0;
-  int startStage = 1;
+  // core takes care of params 4 and 6
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mem_keys));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupElementsNum * sizeof(sort_key_t), NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
   if(ocl->use_index) {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mem_index));
 #if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
@@ -1094,6 +1255,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   }
 
   // set kernel arguments for bitonic global
+  // args 1 and 2 are taken care of in core
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mem_keys));
   if(ocl->use_index) {
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mem_index));
@@ -1112,51 +1274,24 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), NULL));
   }
 
-  // run the first set! (local kernel)
+  // run
   INFO_CMD(
     if(!onlySort)
       printf(INFO_PRINT_PREFIX "ocl-hybrid: start bitonic hybrid\n");
   );
+#ifdef DO_TIMING
+  const int do_timing = 1;
+#else
+  const int do_timing = 0;
+#endif
+  
   T_START(22, "sort");
-  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
+  // hand of to core
+  fcs_ocl_sort_hybrid_core(ocl, &ocl->command_queue, n, global_size_local, local_size_local, workgroupElementsNum, do_timing);
 
-  // set argument for local kernel, will always start in the stage of minDist
-  int minDist = workgroupElementsNum / 2;
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
-
-  // let everything finish first
+  // let it all finally wait
   CL_CHECK(clFinish(ocl->command_queue));
-  T_KERNEL(41, ocl->sort_kernel_completion, "bitonic_local_pre");
-
-  // main loop of bitonic hybrid sort
-  for(stage = workgroupElementsNum; stage < n; stage *= 2) {
-    // set stage argument for global kernel
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
-
-    for(unsigned int dist = stage; dist > minDist; dist /= 2) {
-      // set kernel argument for dist
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
-
-      // and finally run the kernel
-      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
-      CL_CHECK(clFinish(ocl->command_queue));
-      T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
-    }
-
-    // now it's small enough to use the local kernel
-    // increse sort on global factor to simulate a sorting of a higher stage
-    sortOnGlobalFactor *= 2;
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 6, sizeof(int), (void*)&sortOnGlobalFactor));
-    // run the local kernel
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clWaitForEvents(1, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
-    T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_local");
-  }
   T_STOP(22);
-
-  // the magic is already done
 
   // check if we're only sorting
   if(onlySort) {
@@ -1166,8 +1301,6 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     }
     return;
   }
-
-  //fcs_ocl_sort_check_index(ocl, nlocal, keys, offset, &mem_keys, &mem_index);
 
   // read back the results
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: reading back\n"););
@@ -1271,8 +1404,26 @@ static void fcs_ocl_sort_bucket_release(fcs_ocl_context_t* ocl) {
 
 static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
-  // bitonic sort only works for n as real power of 2
+  // round up to next power of 2
   size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
+
+  // now get the params
+  size_t workgroupSortNum;
+  unsigned int workgroupSortSize;
+  size_t workgroupSortLocalSize;
+  size_t bytesPerElement;
+  unsigned int workgroupSortQuota;
+
+  fcs_ocl_sort_hybrid_params(ocl, 1, n, &workgroupSortLocalSize, &bytesPerElement, &workgroupSortQuota, &workgroupSortSize);
+
+#if FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET
+  // just round up to fill the groups
+  if(nlocal % workgroupSortSize != 0)
+    // fill to the remainder
+    n = nlocal + (workgroupSortSize - (nlocal % workgroupSortSize));
+#endif // FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET
+
+  // offset from n
   size_t offset = n - nlocal;
 
   // params
@@ -1299,7 +1450,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   {
     size_t global_size = n - offset;
 
-    cl_buffer_region region = {offset * sizeof(sort_key_t), global_size * sizeof(sort_key_t)};
+    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
@@ -1318,36 +1469,11 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
   // step #2, sort in groups
   T_START(12, "sort_groups");
-  size_t workgroupSortNum;
-  unsigned int workgroupSortSize;
   {
-    size_t local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+    size_t global_size = n / workgroupSortQuota;
+    workgroupSortNum = global_size / workgroupSortLocalSize;
 
-    // size of elements in local memory, depending on buffering of index in local memory
-#if FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
-    const size_t bytesPerElement = sizeof(sort_key_t);
-#else
-    const size_t bytesPerElement = sizeof(sort_key_t) + sizeof(sort_index_t);
-#endif
-
-    unsigned int quota = fcs_ocl_helper_prev_power_of_2(ocl->local_memory / (local_size * bytesPerElement));
-
-    while (n / (4 * quota) < local_size && local_size > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
-      // we need to adjust and make smaller groups
-      local_size /= 2;
-    }
-    // check for invalid quota
-    if(quota == 0) {
-      quota = 1;
-      local_size = fcs_ocl_helper_next_power_of_2((ocl->local_memory / bytesPerElement) / 2);
-    }
-
-    // size of the groups
-    workgroupSortSize = quota * local_size;
-    size_t global_size = n / quota;
-    workgroupSortNum = global_size / local_size;
-
-    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #2 pre sort (quota %d, %d groups, %d elements each)\n", quota, workgroupSortNum, workgroupSortSize););
+    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #2 pre sort (quota %d, %d groups, %d elements each)\n", workgroupSortQuota, workgroupSortNum, workgroupSortSize););
 
     // now set kernel args
     int stage = 1;
@@ -1362,14 +1488,15 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     offsetWorkgroupTotal = offsetWorkgroupNum * workgroupSortSize;
 
     // recalculate the global size that is left
-    global_size = local_size * (workgroupSortNum - offsetWorkgroupNum);
+    global_size = workgroupSortLocalSize * (workgroupSortNum - offsetWorkgroupNum);
 
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: leave out %d offset groups\n", offsetWorkgroupNum););
 
     // make smaller subbuffers
-    cl_buffer_region region = {offsetWorkgroupTotal * sizeof(sort_key_t), (n - offsetWorkgroupTotal) * sizeof(sort_key_t)};
-    cl_mem mem_keys_sub   = CL_CHECK_ERR(clCreateSubBuffer(mem_keys,  CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
-    cl_mem mem_index_sub  = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+    cl_buffer_region region_keys  = {offsetWorkgroupTotal * sizeof(sort_key_t), (n - offsetWorkgroupTotal) * sizeof(sort_key_t)};
+    cl_buffer_region region_index = {offsetWorkgroupTotal * sizeof(sort_index_t), (n - offsetWorkgroupTotal) * sizeof(sort_index_t)};
+    cl_mem mem_keys_sub   = CL_CHECK_ERR(clCreateSubBuffer(mem_keys,  CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region_keys, &_err));
+    cl_mem mem_index_sub  = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region_index, &_err));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mem_keys_sub));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mem_index_sub));
 #else
@@ -1379,7 +1506,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
     // other kernel args
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupSortSize * sizeof(sort_key_t), NULL));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&workgroupSortQuota));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&stage));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
@@ -1389,7 +1516,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 #endif
 
     // and run the kernel on groups
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size, &local_size, 0, NULL, &ocl->sort_kernel_completion));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size, &workgroupSortLocalSize, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(clFinish(ocl->command_queue));
     T_KERNEL(31, ocl->sort_kernel_completion, "bitonic_local_groups");
 
@@ -1405,13 +1532,21 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   // step #3 local sampling
   T_START(13, "local_sampling");
   size_t localSampleTotal = workgroupSortNum * localSampleNum;
+  size_t localSampleTotalN2 = fcs_ocl_helper_next_power_of_2(localSampleTotal);
+  size_t localSampleTotalN2Offset = localSampleTotalN2 - localSampleTotal;
+  cl_mem mem_local_samples_n2;
   cl_mem mem_local_samples;
   {
     unsigned int localSampleDist = workgroupSortSize / localSampleNum;
     size_t global_size = localSampleTotal;
 
-    // create sample buffer
-    mem_local_samples = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, localSampleTotal * sizeof(sort_key_t), NULL, &_err));
+    // create sample buffer with n2 size for sort
+    mem_local_samples_n2 = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, localSampleTotalN2 * sizeof(sort_key_t), NULL, &_err));
+    // offset the buffer
+    cl_buffer_region sampleRegion = {localSampleTotalN2Offset * sizeof(sort_key_t), localSampleTotal * sizeof(sort_key_t)};
+    mem_local_samples = CL_CHECK_ERR(clCreateSubBuffer(mem_local_samples_n2, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &sampleRegion, &_err));
+    // fill with zeros as usual
+    CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_local_samples_n2, &zero, sizeof(zero), 0, localSampleTotalN2Offset * sizeof(sort_key_t), 0, NULL, NULL));
 
     // check for optimizing
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES | FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
@@ -1450,7 +1585,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
 #if FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
     // let finish first
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(32, ocl->sort_kernel_completion, "bucket_sample_local");
 
     // calculate the amount of zero-samples
@@ -1486,10 +1621,10 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   T_STOP(13);
 
   // step #4 sort local samples
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #4 sort all %d samples\n", localSampleTotal););
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #4 sort all %d => %d samples\n", localSampleTotal, localSampleTotalN2););
   T_START(14, "local_sample_sort");
   {
-    fcs_ocl_sort_hybrid(ocl, localSampleTotal, NULL, NULL, NULL, NULL, NULL, NULL, &mem_local_samples, NULL);
+    fcs_ocl_sort_hybrid(ocl, localSampleTotalN2, NULL, NULL, NULL, NULL, NULL, NULL, &mem_local_samples_n2, NULL);
   } // end step #4
   T_STOP(14);
 
@@ -1583,12 +1718,12 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     // now run the prefix sum
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #7 prefix sum\n"););
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_prefix_columns, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(35, ocl->sort_kernel_completion, "bucket_prefix_columns");
 
     // and final step (all in one group)
     CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_prefix_final, 1, NULL, &global_size, &global_size, 0, NULL, &ocl->sort_kernel_completion));
-    CL_CHECK(clFinish(ocl->command_queue));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(36, ocl->sort_kernel_completion, "bucket_prefix_final");
 
     // read back bucket info
@@ -1668,14 +1803,16 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
       // fill the buffer with zeros
       CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mems_bucket_keys[i], &zero, sizeof(zero), 0, bucketOffsets[i] * sizeof(sort_key_t), 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(clFinish(ocl->command_queue));
+      CL_CHECK(T_CL_FINISH(ocl->command_queue));
       T_KERNEL(37, ocl->sort_kernel_completion, "bucket_relocate_fill");
 
       // run the kernel
       CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_relocate, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(clFinish(ocl->command_queue));
+      CL_CHECK(T_CL_FINISH(ocl->command_queue));
       T_KERNEL(38, ocl->sort_kernel_completion, "bucket_relocate");
     }
+    // let the step finish
+    CL_CHECK(clFinish(ocl->command_queue));
   } // end step #8
   T_STOP(18);
 
@@ -1688,14 +1825,73 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   CL_CHECK(clReleaseMemObject(mem_keys));
 
   // step #9 sort the buckets
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #9 sort buckets\n"););
+  INFO_CMD(
+    printf(INFO_PRINT_PREFIX "ocl-bucket: #9 sort buckets\n");
+#if FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
+    printf(INFO_PRINT_PREFIX "ocl-bucket: use multiqueue\n");
+#endif
+  );
   T_START(19, "sort_buckets");
   {
+#if FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
+    // array for all the new queues
+    cl_command_queue* queues = malloc(globalSampleNum * sizeof(cl_command_queue));
+
+    // set general arguments
+    int sortOnGlobal = 1; // true
+    int desc = 0;
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 3, sizeof(int), (void*)&desc));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 5, sizeof(int), (void*)&sortOnGlobal));
+
+    for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
+      if(bucketContainers[i] == 0)
+        continue;
+      
+      // create a new queue
+      queues[i] = CL_CHECK_ERR(clCreateCommandQueue(ocl->context, ocl->device_id, 0, &_err));
+
+      // get args for each bucket
+      const size_t n = bucketContainers[i];
+      size_t local_size;
+      size_t bytesPerElement;
+      unsigned int quota;
+      unsigned int workgroupSortSize;
+
+      // get params
+      fcs_ocl_sort_hybrid_params(ocl, 1, n, &local_size, &bytesPerElement, &quota, &workgroupSortSize);
+      const size_t global_size = n / quota;
+
+      // set bucket-specific args
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 1, workgroupSortSize * sizeof(sort_key_t), NULL));
+#if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 8, workgroupSortSize * sizeof(sort_index_t), NULL));
+#endif
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mems_bucket_index[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mems_bucket_index[i]));
+
+      // run the hybrid core, non-blocking
+      fcs_ocl_sort_hybrid_core(ocl, &queues[i], n, global_size, local_size, workgroupSortSize, 0);
+    }
+
+    // wait and let go of the queues
+    for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
+      if(bucketContainers[i] == 0)
+        continue;
+
+      CL_CHECK(clFinish(queues[i]));
+      CL_CHECK(clReleaseCommandQueue(queues[i]));
+    }
+    free(queues);
+#else
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
       if(bucketContainers[i] == 0)
         continue;
       fcs_ocl_sort_hybrid(ocl, bucketContainers[i], NULL, NULL, NULL, NULL, NULL, NULL, &mems_bucket_keys[i], &mems_bucket_index[i]);
     }
+#endif // FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE
   } // end step 
   T_STOP(19);
 
@@ -1838,7 +2034,7 @@ void fcs_ocl_sort(fcs_near_t* near) {
   fcs_ocl_sort_check(near->nparticles, near->context->real_boxes);
 #endif
 
-  // check for ghost boxed
+  // check for ghost boxes
   if(near->context->ghost_boxes) {
     ocl->_timing = ocl->timing_ghost;
     T_START(3, "sum_sort");

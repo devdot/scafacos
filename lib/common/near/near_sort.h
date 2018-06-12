@@ -32,7 +32,9 @@ extern "C" {
  * TOGGLES
  */
 
-#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 16 // 2^24
+#define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO     1
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 32 // 2^25, only when moving data on gpu
 #define FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL    1
 
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0
@@ -50,9 +52,11 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL 0
 
 // configuration for bucket sort
+#define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1
+#define FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET       1
 // set only either to true
-#define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES    0
-#define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET 1
+#define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES     0
+#define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET  0
 
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES && FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
 #error Cannot enable both optimizations at once

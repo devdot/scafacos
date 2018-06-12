@@ -95,7 +95,7 @@ __kernel void bitonic_local(__global key_t* key,
 						swap_keys(elements[i], elements[j]);
                         // move data along
 #if USE_INDEX
-                        swap_data_global(i, j, dataBuffer);
+                        swap_data_index(i, j, dataBuffer);
 #else
                         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
 #endif
@@ -181,7 +181,7 @@ __kernel void bitonic_local(__global key_t* key,
 						swap_keys(elements[i], elements[j]);
                         // and swap data along
 #if USE_INDEX
-                        swap_data_global(i, j, dataBuffer);
+                        swap_data_index(i, j, dataBuffer);
 #else
                         swap_data_all_global(i, j, positions, charges, indices, field, potentials);
 #endif

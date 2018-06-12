@@ -13,18 +13,17 @@ typedef void HERE_COMES_THE_CODE;
 #define swap_keys(a, b) { a = a ^ b; b = a ^ b; a = a ^ b; }
 
 // generic swap
-#ifdef NVIDIA
-#define swap_data(a, b) { __private auto tmp = a; a = b; b = tmp; }
-#else
-#define swap_data(a, b) { typeof(a) tmp = a; a = b; b = tmp; }
-#endif
+// we have to hand in the data type separatly because typeof will keep the address space type (eg return __global int instead of int)
+#define swap_data(a, b, type) { __private type tmp = a; a = b; b = tmp; }
+#define swap_data_index(a, b, arr) { swap_data(arr[a], arr[b], index_t); }
+
 
 #ifndef USE_INDEX
 #define USE_INDEX 0
 #endif
 
 // generic swap on global array
-#define swap_data_global(i, j, array) { swap_data(array[i], array[j]); }
+#define swap_data_global(i, j, array, type) { swap_data(array[i], array[j], type); }
 
 static void inline swap_data_float_triple_global(int i, int j, __global fcs_float* array) {
     int k = i * 3;
@@ -51,12 +50,12 @@ static void inline swap_data_all_global(int i, int j,
     __global fcs_float* potentials)
 {
     swap_data_float_triple_global(i, j, positions);
-    swap_data_global(i, j, charges);
-    swap_data_global(i, j, indices);
+    swap_data_global(i, j, charges, fcs_float);
+    swap_data_global(i, j, indices, fcs_gridsort_index_t);
     if(field != NULL)
         swap_data_float_triple_global(i, j, field);
     if(potentials != NULL)
-        swap_data_global(i, j, potentials);
+        swap_data_global(i, j, potentials, fcs_float);
 }
 
 #if USE_INDEX
