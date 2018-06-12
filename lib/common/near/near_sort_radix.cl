@@ -75,16 +75,16 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
     buffer[2 * local_id + 1] = histograms[1];
 
     // run prefix sum
-    int decale = 1; // ???
+    int dist = 1;
     for(int d = n >> 1; d > 0; d >>= 1) {
         barrier(CLK_LOCAL_MEM_FENCE);
 
         if(local_id < d) {
-            int ai = decale * (2 * local_id + 1) - 1;
-            int bi = decale * (2 * local_id + 2) - 1;
+            int ai = dist * (2 * local_id + 1) - 1;
+            int bi = dist * (2 * local_id + 2) - 1;
             buffer[bi] += buffer[ai];
         }
-        decale *= 2;
+        dist *= 2;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -97,12 +97,12 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
 
     // sweep back down
     for(int d = 1; d < n; d <<= 1) {
-        decale >>= 1;
+        dist >>= 1;
         barrier(CLK_LOCAL_MEM_FENCE);
 
         if(local_id < d) {
-            int ai = decale * (2 * local_id + 1) - 1;
-            int bi = decale * (2 * local_id + 2) - 1;
+            int ai = dist * (2 * local_id + 1) - 1;
+            int bi = dist * (2 * local_id + 2) - 1;
 
             histogram_t tmp = buffer[ai];
             buffer[ai] = buffer[bi];
@@ -116,51 +116,6 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
     histograms[1] = buffer[2 * local_id + 1];
 }
 
-#if RADIX_SCALE
-
-// kernel that will do the scan on global for max scalability (aux scan)
-// parallel prefix sum
-// two memory items per workitem
-__kernel void radix_scan_global(__global histogram_t* histograms) {
-    int global_id = get_global_id(0);
-    int n = get_global_size(0) * 2;
-
-    // run prefix sum
-    int decale = 1; // TODO
-    for(int d = n >> 1; d > 0; d >>= 1) {
-        if(global_id < d) {
-            int ai = decale * (2 * global_id + 1) - 1;
-            int bi = decale * (2 * global_id + 2) - 1;
-            histograms[bi] += histograms[ai];
-        }
-        decale *= 2;
-        barrier(CLK_GLOBAL_MEM_FENCE);
-    }
-    
-
-    if(global_id == 0) {
-        // set to 0
-        histograms[n - 1] = 0;
-    }
-
-    // sweep back down
-    for(int d = 1; d < n; d <<= 1) {
-        decale >>= 1;
-
-        if(global_id < d) {
-            int ai = decale * (2 * global_id + 1) - 1;
-            int bi = decale * (2 * global_id + 2) - 1;
-
-            histogram_t tmp = histograms[ai];
-            histograms[ai] = histograms[bi];
-            histograms[bi] += tmp;
-        }
-        barrier(CLK_GLOBAL_MEM_FENCE);
-    }
-}
-
-
-#endif
 
 __kernel void radix_histogram_paste(__global histogram_t* histograms, __global histogram_t* sum) {
     histogram_t s = sum[get_group_id(0)];
