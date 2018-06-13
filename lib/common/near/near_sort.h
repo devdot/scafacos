@@ -92,6 +92,10 @@ void fcs_ocl_sort(fcs_near_t* near);
        __typeof__ (b) _b = (b); \
      _a > _b ? _a : _b; })
 
+#define min(a, b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a < _b ? _a : _b; })
 
 #if FCS_NEAR_OCL_DATA_INDEX_IS_INT
   typedef int sort_index_t;
