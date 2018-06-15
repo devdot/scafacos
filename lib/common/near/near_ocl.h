@@ -81,6 +81,9 @@ typedef struct
   cl_event kernel_completion;
 
 #if FCS_NEAR_OCL_SORT
+  int buffers_on_device;
+  int buffers_on_device_ghost;
+
   int use_index;
 
   cl_device_id device_id;

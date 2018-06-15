@@ -432,31 +432,72 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
 
   // read back the buffers for data
   T_START(53, "move_data_read");
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positionsOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_chargesOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  // always read back indices
   CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_indicesOut, CL_FALSE, 0, nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
-  if(field != NULL)
-    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_fieldOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
-  if(potentials != NULL)
-    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_potentialsOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
 
+#if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  if(ocl->buffers_on_device != -1) {
+    // so we should keep the buffers on the device
+    // check if we are ghosts (we know that when the buffers for normal particles are already on the device)
+    if(ocl->buffers_on_device == 1) {
+      // we are ghost particles
+      ocl->mem_gpositions = mem_positionsOut;
+      ocl->mem_gcharges   = mem_chargesOut;
+
+      INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: keep ghost buffers on device\n"););
+      ocl->buffers_on_device_ghost = 1;
+    }
+    else {
+      // we are normal particles
+      ocl->mem_positions  = mem_positionsOut;
+      ocl->mem_charges    = mem_chargesOut;
+      ocl->mem_field      = mem_fieldOut;
+      ocl->mem_potentials = mem_potentialsOut;
+
+      INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: keep particle buffers on device\n"););
+      ocl->buffers_on_device = 1;
+
+      // read back postions and charges as well (for final results)
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positionsOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_chargesOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+    }
+  }
+  else
+#endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  {
+    // don't keep on device but read back
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positionsOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_chargesOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+    if(field != NULL)
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_fieldOut, CL_FALSE, 0, nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    if(potentials != NULL)
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_potentialsOut, CL_FALSE, 0, nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+  }
   CL_CHECK(clFinish(ocl->command_queue));
   T_STOP(53);
 
   // release our buffers
+  // always release those working buffers
   CL_CHECK(clReleaseMemObject(mem_positionsIn));
-  CL_CHECK(clReleaseMemObject(mem_positionsOut));
   CL_CHECK(clReleaseMemObject(mem_chargesIn));
-  CL_CHECK(clReleaseMemObject(mem_chargesOut));
   CL_CHECK(clReleaseMemObject(mem_indicesIn));
   CL_CHECK(clReleaseMemObject(mem_indicesOut));
-  if(field != NULL) {
+  if(field != NULL)
     CL_CHECK(clReleaseMemObject(mem_fieldIn));
-    CL_CHECK(clReleaseMemObject(mem_fieldOut));
-  }
-  if(potentials != NULL) {
+  if(potentials != NULL)
     CL_CHECK(clReleaseMemObject(mem_potentialsIn));
-    CL_CHECK(clReleaseMemObject(mem_potentialsOut));
+
+#if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+    // check if we should not keep on device
+    if(ocl->buffers_on_device == -1)
+#endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  {
+    CL_CHECK(clReleaseMemObject(mem_positionsOut));
+    CL_CHECK(clReleaseMemObject(mem_chargesOut));
+    if(field != NULL)
+      CL_CHECK(clReleaseMemObject(mem_fieldOut));
+    if(potentials != NULL)
+      CL_CHECK(clReleaseMemObject(mem_potentialsOut));
   }
   
   T_STOP(24);
@@ -2067,10 +2108,15 @@ void fcs_ocl_sort(fcs_near_t* near) {
   ocl->_timing = ocl->timing;
 #endif // DO_TIMING
 
-  T_START(0, "sum");
-  // set usage of index to 1
-  near->context->ocl.use_index = 1;
+#if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  if(near->near_param.ocl == 0) {
+    // ocl compute isn't even used, don't keep buffers
+    ocl->buffers_on_device = -1;
+    ocl->buffers_on_device_ghost = -1;
+  }
+#endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
 
+  T_START(0, "sum");
   T_START(1, "sum_prepare");
   switch(near->near_param.ocl_sort_algo)
   {

@@ -810,6 +810,13 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   // query local memory size
   clGetDeviceInfo(device_id, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(ocl->local_memory), &ocl->local_memory, NULL);
   clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(ocl->global_memory), &ocl->global_memory, NULL);
+
+  // set values to initial settings
+  ocl->buffers_on_device = 0;
+  ocl->buffers_on_device_ghost = 0;
+
+  // set usage of index to 1
+  ocl->use_index = 1;
 #endif
 
   cl_int ret;
@@ -900,15 +907,22 @@ static fcs_int fcs_ocl_compute_near_prepare(fcs_ocl_context_t *ocl, fcs_float cu
 
   } else ocl->mem_param = NULL;
 
-  ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nparticles * 3 * sizeof(fcs_float), positions, &_err));
-  ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nparticles * sizeof(fcs_float), charges, &_err));
-  ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nparticles * 3 * sizeof(fcs_float), field, &_err));
-  ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nparticles * sizeof(fcs_float), potentials, &_err));
+#if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  // make sure the buffers are on the device
+  if(ocl->buffers_on_device != 1)
+#endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+  {
+    // but now write to device
+    ocl->mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nparticles * 3 * sizeof(fcs_float), positions, &_err));
+    ocl->mem_charges    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nparticles * sizeof(fcs_float), charges, &_err));
+    ocl->mem_field      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nparticles * 3 * sizeof(fcs_float), field, &_err));
+    ocl->mem_potentials = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, nparticles * sizeof(fcs_float), potentials, &_err));
 
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nparticles * sizeof(fcs_float), charges, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
-  CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nparticles * sizeof(fcs_float), potentials, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_positions,  CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_charges,    CL_FALSE, 0, nparticles * sizeof(fcs_float), charges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_field,      CL_FALSE, 0, nparticles * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_potentials, CL_FALSE, 0, nparticles * sizeof(fcs_float), potentials, 0, NULL, NULL));
+  }
 
   ocl->mem_box_info = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, &_err));
   CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_box_info, CL_FALSE, 0, ocl->nboxes * 6 * sizeof(fcs_int), ocl->box_info, 0, NULL, WRITE_EVENT));
@@ -922,12 +936,17 @@ static fcs_int fcs_ocl_compute_near_prepare(fcs_ocl_context_t *ocl, fcs_float cu
 
   if (nghosts > 0)
   {
-    ocl->mem_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nghosts * 3 * sizeof(fcs_float), gpositions, &_err));
-    ocl->mem_gcharges   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nghosts * sizeof(fcs_float), gcharges, &_err));
+#if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+    if(ocl->buffers_on_device_ghost != 1)
+#endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
+    {
+      // write ghost buffers to device
+      ocl->mem_gpositions = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nghosts * 3 * sizeof(fcs_float), gpositions, &_err));
+      ocl->mem_gcharges   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, nghosts * sizeof(fcs_float), gcharges, &_err));
 
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, nghosts * 3 * sizeof(fcs_float), gpositions, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, nghosts * sizeof(fcs_float), gcharges, 0, NULL, WRITE_EVENT));
-
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gpositions, CL_FALSE, 0, nghosts * 3 * sizeof(fcs_float), gpositions, 0, NULL, NULL));
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, ocl->mem_gcharges, CL_FALSE, 0, nghosts * sizeof(fcs_float), gcharges, 0, NULL, WRITE_EVENT));
+    }
     if (ocl->nghost_neighbour_boxes > 0)
     {
       ocl->mem_ghost_neighbour_boxes = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, ocl->nghost_neighbour_boxes * 2 * sizeof(fcs_int), ocl->ghost_neighbour_boxes, &_err));
