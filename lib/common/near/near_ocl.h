@@ -92,7 +92,11 @@ typedef struct
   cl_ulong local_memory;
 
   cl_program sort_program_bitonic;
-  cl_kernel sort_kernel_bitonic_global_2; 
+  cl_kernel sort_kernel_bitonic_global_2;
+  cl_kernel sort_kernel_bitonic_global_4;
+  cl_kernel sort_kernel_bitonic_global_8;
+  cl_kernel sort_kernel_bitonic_global_16;
+  cl_kernel sort_kernel_bitonic_global_32;
 
   cl_program sort_program_hybrid;
   cl_kernel sort_kernel_bitonic_local;
