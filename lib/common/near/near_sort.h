@@ -52,7 +52,7 @@ extern "C" {
 // configuration for bitonic sort
 #define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4  1
 #define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8  1
-#define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16 0
+#define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16 1
 #define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32 0
 
 // configuration for hybrid sort

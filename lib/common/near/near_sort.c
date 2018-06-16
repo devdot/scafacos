@@ -985,6 +985,11 @@ static void fcs_ocl_sort_bitonic_release(fcs_ocl_context_t *ocl) {
     }\
   }
 
+#define BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(level) {\
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_##level, 0, sizeof(cl_mem), &mems_bucket_keys[i]));\
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_##level, 3, sizeof(cl_mem), &mems_bucket_index[i]));\
+  }
+
 static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
   // sort for param keys
@@ -1222,6 +1227,18 @@ static void fcs_ocl_sort_hybrid_prepare(fcs_ocl_context_t *ocl) {
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-hybrid: creating kernels\n"););
   ocl->sort_kernel_bitonic_local    = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_local", &_err));
   ocl->sort_kernel_bitonic_global_2 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_2", &_err));
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4
+  ocl->sort_kernel_bitonic_global_4 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_4", &_err));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8
+  ocl->sort_kernel_bitonic_global_8 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_8", &_err));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16
+  ocl->sort_kernel_bitonic_global_16 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_16", &_err));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32
+  ocl->sort_kernel_bitonic_global_32 = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_hybrid, "bitonic_global_32", &_err));
+#endif
 
   if(ocl->use_index) {
     // create additional kernels
@@ -1239,6 +1256,20 @@ static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl) {
   // destroy our kernel and program
   CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_local));
   CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_2));
+
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_4));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_8));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_16));
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32
+  CL_CHECK(clReleaseKernel(ocl->sort_kernel_bitonic_global_32));
+#endif
+
   CL_CHECK(clReleaseProgram(ocl->sort_program_hybrid));
   if(ocl->use_index) {
     // let the move kernels go
@@ -1253,7 +1284,7 @@ static void fcs_ocl_sort_hybrid_release(fcs_ocl_context_t *ocl) {
 // only sets following kernel args:
 //    bitonic_local:    4 (stage)
 //                      6 (sortOnGlobalFactor)
-//    bitonic_global_2: 1 (stage)
+//    bitonic_global_n: 1 (stage)
 //                      2 (dist)
 static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_queue* queue, const size_t n, const size_t global_size_local, const size_t local_size_local, const size_t workgroupElementsNum, const int wait_timing) {
   unsigned int stage = 1;
@@ -1264,6 +1295,12 @@ static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_q
   cl_event* event = NULL;
   if(wait_timing)
     event = &ocl->sort_kernel_completion;
+
+  // flags for bitonic global kernels
+  const int use_global_4  = FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4;
+  const int use_global_8  = FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8;
+  const int use_global_16 = FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16;
+  const int use_global_32 = FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32;
 
   // run first groups
   CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, event));
@@ -1277,22 +1314,70 @@ static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_q
   int minDist = workgroupElementsNum / 2;
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 4, sizeof(int), (void*)&minDist));
 
-  const size_t global_size_global = n / 2;
+  const size_t global_size_global2 = n / 2;
+  const size_t global_size_global4 = n / 4;
+  const size_t global_size_global8 = n / 8;
+  const size_t global_size_global16 = n / 16;
+  const size_t global_size_global32 = n / 32;
 
   // main loop of bitonic hybrid
   for(stage = workgroupElementsNum; stage < n; stage *= 2) {
     // set stage argument for global kernel
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 1, sizeof(int), (void*)&stage));
+    // and for other kernels if activated
+    if(use_global_4) CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_4, 1, sizeof(int), (void*)&stage));
+    if(use_global_8) CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_8, 1, sizeof(int), (void*)&stage));
+    if(use_global_16) CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_16, 1, sizeof(int), (void*)&stage));
+    if(use_global_32) CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_32, 1, sizeof(int), (void*)&stage));
 
     for(unsigned int dist = stage; dist > minDist; dist /= 2) {
       // set kernel argument for dist
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
-
       // and finally run the kernel
-      CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global, NULL, 0, NULL, event));
-      if(wait_timing) {
-        CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
-        T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
+      // select the one that we can use
+      if(use_global_32 && dist > 16 * minDist) {
+        CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_32, 2, sizeof(int), (void*)&dist));
+        CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_32, 1, NULL, &global_size_global32, NULL, 0, NULL, &ocl->sort_kernel_completion));
+        if(wait_timing) {
+          CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+          T_KERNEL(46, ocl->sort_kernel_completion, "bitonic_global_32");
+        }
+        dist /= 16;
+      }
+      else if(use_global_16 && dist > 8 * minDist) {
+        CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_16, 2, sizeof(int), (void*)&dist));
+        CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_16, 1, NULL, &global_size_global16, NULL, 0, NULL, &ocl->sort_kernel_completion));
+        if(wait_timing) {
+          CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+          T_KERNEL(45, ocl->sort_kernel_completion, "bitonic_global_16");
+        }
+        dist /= 8;
+      }
+      else if(use_global_8 && dist > 4 * minDist) {
+        CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_8, 2, sizeof(int), (void*)&dist));
+        CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_8, 1, NULL, &global_size_global8, NULL, 0, NULL, &ocl->sort_kernel_completion));
+        if(wait_timing) {
+          CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+          T_KERNEL(44, ocl->sort_kernel_completion, "bitonic_global_8");
+        }
+        dist /= 4;
+      }
+      else if(use_global_4 && dist > 2 * minDist) {
+        CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_4, 2, sizeof(int), (void*)&dist));
+        CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_4, 1, NULL, &global_size_global4, NULL, 0, NULL, &ocl->sort_kernel_completion));
+        if(wait_timing) {
+          CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+          T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_global_4");
+        }
+        dist /= 2;
+      }
+      else {
+        CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 2, sizeof(int), (void*)&dist));
+        CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_global_2, 1, NULL, &global_size_global2, NULL, 0, NULL, &ocl->sort_kernel_completion));
+        if(wait_timing) {
+          CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
+          T_KERNEL(42, ocl->sort_kernel_completion, "bitonic_global_2");
+        }
       }
     }
 
@@ -1304,7 +1389,7 @@ static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_q
     CL_CHECK(clEnqueueNDRangeKernel(*queue, ocl->sort_kernel_bitonic_local, 1, NULL, &global_size_local, &local_size_local, 0, NULL, event));
     if(wait_timing) {
       CL_CHECK(T_CL_WAIT_EVENT(1, &ocl->sort_kernel_completion));
-      T_KERNEL(43, ocl->sort_kernel_completion, "bitonic_local");
+      T_KERNEL(49, ocl->sort_kernel_completion, "bitonic_local");
     }
   }
 }
@@ -1474,26 +1559,22 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     else
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 11, sizeof(cl_mem), NULL));
   }
-
   // set kernel arguments for bitonic global
   // args 1 and 2 are taken care of in core
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mem_keys));
-  if(ocl->use_index) {
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mem_index));
-  }
-  else {
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mem_positions));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 4, sizeof(cl_mem), &mem_charges));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 5, sizeof(cl_mem), &mem_indices));
-    if(field != NULL)
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), &mem_field));
-    else
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 6, sizeof(cl_mem), NULL));
-    if(potentials != NULL)
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), &mem_potentials));
-    else
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 7, sizeof(cl_mem), NULL));
-  }
+  BITONIC_SET_GLOBAL_KERNEL_ARGS(2);
+  // higher levels
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4
+  BITONIC_SET_GLOBAL_KERNEL_ARGS(4);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8
+  BITONIC_SET_GLOBAL_KERNEL_ARGS(8);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16
+  BITONIC_SET_GLOBAL_KERNEL_ARGS(16);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32
+  BITONIC_SET_GLOBAL_KERNEL_ARGS(32);
+#endif
 
   // run
   INFO_CMD(
@@ -2090,8 +2171,20 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 2, sizeof(int), (void*)&quota));
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_local, 7, sizeof(cl_mem), &mems_bucket_index[i]));
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 0, sizeof(cl_mem), &mems_bucket_keys[i]));
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bitonic_global_2, 3, sizeof(cl_mem), &mems_bucket_index[i]));
+      BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(2);
+
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4
+      BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(4);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8
+      BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(8);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16
+      BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(16);
+#endif
+#if FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32
+      BITONIC_SET_GLOBAL_KERNEL_ARGS_BUCKET(32);
+#endif
 
       // run the hybrid core, non-blocking
       fcs_ocl_sort_hybrid_core(ocl, &queues[i], n, global_size, local_size, workgroupSortSize, 0);
