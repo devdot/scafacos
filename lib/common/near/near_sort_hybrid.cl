@@ -36,9 +36,11 @@ __kernel void bitonic_local(__global key_t* key,
 		sortDesc  = sortDesc ^ ((get_group_id(0) & (sortOnGlobalFactor)) != 0);
 	}
 	
-	int iBase = get_local_id(0) * quota;
+	int local_id = get_local_id(0);
+	int local_workitems = get_local_size(0);
+	int iBase = local_id * quota;
 	// total number of elements is the amout of threads * elements per threads (quota)
-	int len = get_local_size(0) * quota; 
+	int len = local_workitems * quota;
 
 	// put the global offset onto the global pointers
     int globalOffset = len * get_group_id(0);
@@ -56,14 +58,20 @@ __kernel void bitonic_local(__global key_t* key,
         field += globalOffset * 3;
     if(potentials != NULL)
         potentials += globalOffset;
-#endif
+#endif // USE_INDEX
 
 	// load global keys into local
+	int index;
 	for(int i = 0; i < quota; i++) {
-		elements[i + iBase] = key[i + iBase];
+#if HYBRID_COALESCE
+		index = local_id + local_workitems * i;
+#else
+		index = i + iBase;
+#endif // HYBRID_COALESCE
+		elements[index] = key[index];
 
 #if USE_INDEX && !HYBRID_INDEX_GLOBAL
-        dataBuffer[i + iBase] = data[i + iBase];
+        dataBuffer[index] = data[index];
 #endif
     }
 
@@ -132,14 +140,14 @@ __kernel void bitonic_local(__global key_t* key,
                 index_t iData = dataBuffer[i];
                 index_t jData = dataBuffer[j];
 #endif
-				// calculate whether we have to swap
+				// calculate whether the elements should be swapped
 				bool swap = (jElement < iElement) ^ (j < i) ^ desc;
 #if USE_INDEX
 				// we need to make sure not to swap on equal,
 				//   this wouldn't matter for key, but data will be corrupted otherwise
 				swap = (jElement != iElement) && swap;
 #endif
-				// sync up the memory before and after swap
+				// sync up the threads before and after swap
 				barrier(CLK_LOCAL_MEM_FENCE);
 				elements[i] = swap?jElement:iElement;
 #if USE_INDEX
@@ -199,9 +207,15 @@ __kernel void bitonic_local(__global key_t* key,
 	// don't need a barrier here, we got one after the last write
 	// save back the results to global memory
 	for(int i = 0; i < quota; i++) {
-		key[i + iBase] = elements[i + iBase];
+#if HYBRID_COALESCE
+		index = local_id + local_workitems * i;
+#else
+		index = i + iBase;
+#endif // HYBRID_COALESCE
+
+		key[index] = elements[index];
 #if USE_INDEX && !BITONIC_INDEX_GLOBAL
-        data[i + iBase] = dataBuffer[i + iBase];
+        data[index] = dataBuffer[index];
 #endif
     }
 }
