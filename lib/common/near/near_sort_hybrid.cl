@@ -1,7 +1,7 @@
 // bitonic sort kernel for sorting the maximum amount of local storage
 // this kernel is supposed to be fit by local memory size, not thread-to-element rate
 
-// IMPORTANT: quota is assumed to be 2 or a power of 2 (actually works with quota 1)
+// IMPORTANT: quota is assumed to be 2 or a power of 2
 // quota is: number of sorting elements in workgroup / number of threads in workgroup
 
 typedef void HERE_COMES_THE_CODE;
@@ -39,8 +39,15 @@ __kernel void bitonic_local(__global key_t* key,
 	int local_id = get_local_id(0);
 	int local_workitems = get_local_size(0);
 	int iBase = local_id * quota;
+	int iBasePlusQuota = iBase + quota;
 	// total number of elements is the amout of threads * elements per threads (quota)
 	int len = local_workitems * quota;
+
+#if !HYBRID_PAIRWISE
+	// middle section is not done pairwise, only use half quota
+	int iBaseHalf = iBase >> 1;
+	int iBaseHalfPlusQuota = iBasePlusQuota >> 1;
+#endif // HYBRID_PAIRWISE
 
 	// put the global offset onto the global pointers
     int globalOffset = len * get_group_id(0);
@@ -80,7 +87,6 @@ __kernel void bitonic_local(__global key_t* key,
 
 	// first of all, use this thread alone for the first stages until this kernel is actuall doing anything synced with the others
 	int i, j;
-	int iBasePlusQuota = iBase + quota;
 	for(;stage < quota; stage <<= 1) {
 		// go through distances of this stage
 		for(int dist = stage; dist > 0; dist >>= 1) {
@@ -129,9 +135,10 @@ __kernel void bitonic_local(__global key_t* key,
 		int dist = stage;
 		for(; dist >= quota; dist >>= 1) {
 			// go through each of our elements
+#if HYBRID_PAIRWISE
 			for(i = iBase; i < iBasePlusQuota; i++) {
 				// calculate the partner
-				j = i ^ dist; // now we need xor!
+				j = i ^ dist;
 
 				// save keys
 				key_t iElement = elements[i];
@@ -139,33 +146,57 @@ __kernel void bitonic_local(__global key_t* key,
 #if USE_INDEX
                 index_t iData = dataBuffer[i];
                 index_t jData = dataBuffer[j];
-#endif
+#endif // USE_INDEX
 				// calculate whether the elements should be swapped
 				bool swap = (jElement < iElement) ^ (j < i) ^ desc;
 #if USE_INDEX
 				// we need to make sure not to swap on equal,
 				//   this wouldn't matter for key, but data will be corrupted otherwise
 				swap = (jElement != iElement) && swap;
-#endif
+#endif // USE_INDEX
 				// sync up the threads before and after swap
 				barrier(CLK_LOCAL_MEM_FENCE);
 				elements[i] = swap?jElement:iElement;
 #if USE_INDEX
                 dataBuffer[i] = swap?jData:iData;
-#endif
+#endif // USE_INDEX
 				barrier(CLK_LOCAL_MEM_FENCE);
 
 #if !USE_INDEX
 #ifdef NO_SWAP_ON_EQUAL
 				swap = swap && (elements[i] != elements[j]);
-#endif
+#endif // NO_SWAP_ON_EQUAL
                 // and move data on global arrays
                 if(swap && j > i) {
                     // only the first of both work items works this
                     swap_data_all_global(i, j, positions, charges, indices, field, potentials);
                 }
-#endif
+#endif // !USE_INDEX
 			}
+#else // HYBRID_PAIRWISE
+			for(int k = iBaseHalf; k < iBaseHalfPlusQuota; k++) {
+				// calculate i and j
+				i = (k << 1) - (k & (dist - 1));
+				j = i + dist;
+
+				// calculate the swap
+				bool swap = (elements[i] > elements[j]) ^ desc;
+#ifdef NO_SWAP_ON_EQUAL
+				swap = swap && (elements[i] != elements[j]);
+#endif // NO_SWAP_ON_EQUAL
+				if(swap) {
+					swap_keys(elements[i], elements[j]);
+					// move data along
+#if USE_INDEX
+					swap_data_index(i, j, dataBuffer);
+#else // USE_INDEX
+					swap_data_all_global(i, j, positions, charges, indices, field, potentials);
+#endif // USE_INDEX
+				}
+			}
+			// finally sync after the non-pairwise section
+			barrier(CLK_LOCAL_MEM_FENCE);
+#endif // HYBRID_PAIRWISE
 		}
 
 		// now the remaining distances are within our own realm (quota)

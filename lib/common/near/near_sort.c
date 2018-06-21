@@ -75,6 +75,7 @@ static const char *fcs_ocl_cl_sort_config =
   "#define RADIX_SCALE " STR(FCS_NEAR_OCL_SORT_RADIX_SCALE) "\n"
   "#define HYBRID_INDEX_GLOBAL " STR(FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL) "\n"
   "#define HYBRID_COALESCE " STR(FCS_NEAR_OCL_SORT_HYBRID_COALESCE) "\n"
+  "#define HYBRID_PAIRWISE " STR(FCS_NEAR_OCL_SORT_HYBRID_PAIRWISE) "\n"
 
 #if FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL
   "#define NO_SWAP_ON_EQUAL\n"
@@ -339,7 +340,7 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
 
   INFO_CMD(
     printf(INFO_PRINT_PREFIX "ocl-sort: move data auto\n");
-    printf(INFO_PRINT_PREFIX "ocl-sort: %lld B per index, %lld B per triple, %lld B per all\n", sizeof_index, sizeof_data_triple, sizeof_data_all);
+    printf(INFO_PRINT_PREFIX "ocl-sort: %ld B per index, %ld B per triple, %ld B per all\n", sizeof_index, sizeof_data_triple, sizeof_data_all);
     printf(INFO_PRINT_PREFIX "ocl-sort: %f MB global mem, %f MB for index buffer, %f MB split, %f MB all\n", ocl->global_memory / 1048576.f, buffer_size / 1048576.f, size_split / 1048576.f, size_all / 1048576.f);
   );
 
@@ -674,13 +675,13 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   const size_t local_size_reorder  = local_size;
 
   INFO_CMD(
-    printf(INFO_PRINT_PREFIX "ocl-radix: Sort %d => %d elements with radixsort\n", nlocal, n);
+    printf(INFO_PRINT_PREFIX "ocl-radix: Sort %ld => %ld elements with radixsort\n", nlocal, n);
     printf(INFO_PRINT_PREFIX "ocl-radix: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
     printf(INFO_PRINT_PREFIX "ocl-radix: %ld groups, %ld elements each\n", n / local_size, local_size);
 #if FCS_NEAR_OCL_SORT_RADIX_SCALE
     printf(INFO_PRINT_PREFIX "ocl-radix: %d scan levels: ", scan_levels);
     for(int i = 0; i < scan_levels; i++)
-      printf("(%d, %d) ", global_sizes_scan[i], local_sizes_scan[i]);
+      printf("(%ld, %ld) ", global_sizes_scan[i], local_sizes_scan[i]);
     printf("\n");
 #else // FCS_NEAR_OCL_SORT_RADIX_SCALE
     printf(INFO_PRINT_PREFIX "ocl-radix: Scan: %ld groups, %ld elements each\n", global_size_scan / local_size_scan, scan_size);
@@ -1000,7 +1001,7 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
   size_t n = fcs_ocl_helper_next_power_of_2(nlocal);
   size_t offset = n - nlocal;
 
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: bitonic (use index: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, nlocal, n););
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: bitonic (use index: %d) [%ld] => [%ld]\n", ocl->use_index, nlocal, n););
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bitonic: initializing buffers\n"););
   // then initialize memory and write to it
@@ -1463,7 +1464,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
   if(!onlySort) {
     INFO_CMD(
-      printf(INFO_PRINT_PREFIX "ocl-hybrid: bitonic hybrid (use index: %d, index global: %d) [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", ocl->use_index, FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL, nlocal, n);
+      printf(INFO_PRINT_PREFIX "ocl-hybrid: bitonic hybrid (use index: %d, index global: %d) [%ld] => [%ld]\n", ocl->use_index, FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL, nlocal, n);
       printf(INFO_PRINT_PREFIX "ocl-hybrid: %ld groups, %d elements each (quota %d)\n", global_size_local / local_size_local, workgroupElementsNum, quota);
       printf(INFO_PRINT_PREFIX "ocl-hybrid: local memory: %ld of %ld bytes\n", bytesPerElement * workgroupElementsNum, ocl->local_memory);
     );
@@ -1734,7 +1735,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   const unsigned int globalSampleNum = 64;
 
   INFO_CMD(
-    printf(INFO_PRINT_PREFIX "ocl-bucket: GPU Bucket Sort [%" FCS_LMOD_INT "d] => [%"  FCS_LMOD_INT "d]\n", nlocal, n);
+    printf(INFO_PRINT_PREFIX "ocl-bucket: GPU Bucket Sort [%ld] => [%ld]\n", nlocal, n);
   );
 
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #1 initializing and writing buffers\n"););
@@ -1776,7 +1777,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     size_t global_size = n / workgroupSortQuota;
     workgroupSortNum = global_size / workgroupSortLocalSize;
 
-    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #2 pre sort (quota %d, %d groups, %d elements each)\n", workgroupSortQuota, workgroupSortNum, workgroupSortSize););
+    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #2 pre sort (quota %d, %ld groups, %d elements each)\n", workgroupSortQuota, workgroupSortNum, workgroupSortSize););
 
     // now set kernel args
     int stage = 1;
@@ -1924,7 +1925,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   T_STOP(13);
 
   // step #4 sort local samples
-  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #4 sort all %d => %d samples\n", localSampleTotal, localSampleTotalN2););
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #4 sort all %ld => %ld samples\n", localSampleTotal, localSampleTotalN2););
   T_START(14, "local_sample_sort");
   {
     fcs_ocl_sort_hybrid(ocl, localSampleTotalN2, NULL, NULL, NULL, NULL, NULL, NULL, &mem_local_samples_n2, NULL);
@@ -2062,7 +2063,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   // check whether the first bucket is skipped wrongly
 #ifdef DO_CHECK
   if(skipFirstBucket && bucketContainers[0] - bucketOffsets[0] != offset) {
-    printf("error with skipping first bucket: has size %d but offset is %d\n", bucketContainers[0] - bucketOffsets[0], offset);
+    printf("error with skipping first bucket: has size %d but offset is %ld\n", bucketContainers[0] - bucketOffsets[0], offset);
     abort();
   }
 #endif // DO_CHECK
