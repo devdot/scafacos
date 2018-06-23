@@ -142,34 +142,29 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 		barrier(CLK_GLOBAL_MEM_FENCE);
 	}
 
-	// insert 0 with one thread
-	if(local_id == 0) {
-		matrix[(rows - 1) * cols] = 0;
-	}
+	// no insertion of 0 because we're not doing the orginal prefix sum
 
 	// downsweep
-	for(int d = 1; d < n; d <<= 1) {
-		dist >>= 1;
+	// working a little different than blelloch
+	dist >>= 2;
+	for(int d = 2; d < n; d <<= 1) {
 		barrier(CLK_GLOBAL_MEM_FENCE);
 		// handle quota, now right to left
 		local_id += quota * local_size;
 		for(int i = quota; i > 0; i--) {
 			// decrement right away, start one to high
 			local_id -= local_size;
-			if(local_id < d) {
-				int ai = (dist * (2 * local_id + 1) - 1) - offset;
-				int bi = (dist * (2 * local_id + 2) - 1) - offset;
+			if(local_id < d - 1) {
+				int ai = (dist * 2 * (local_id + 1)) - 1 - offset;
+				int bi = ai + dist;
 
 				// check if ai is negative, if so we don't need to do anything
 				if(ai >= 0) {
-					ai *= cols;
-					bi *= cols;
-					int tmp =  matrix[ai];
-					matrix[ai] = matrix[bi];
-					matrix[bi] += tmp;
+					matrix[bi * cols] += matrix[ai * cols];
 				}
 			}
 		}
+		dist >>= 1;
 	}
 }
 
