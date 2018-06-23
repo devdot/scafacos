@@ -8,19 +8,24 @@ typedef void HERE_COMES_THE_CODE;
 
 // will get one sample from keys into samples, each have dist distance between them
 __kernel void bucket_sample(__global const key_t* keys, int dist, __global key_t* samples) {
-	samples[get_global_id(0)] = keys[get_global_id(0) * dist];
+	size_t global_id = get_global_id(0);
+	samples[global_id] = keys[global_id * dist];
 }
 
 // kernel for indexing of global samples
 // returns the next bigger element when the searched sample was not found
+// global size: matrix size = buckets * sort groups
+// local size: buckets
 __kernel void bucket_index_samples(__global const key_t* keys, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize) {
 	// offset the keys and matrix pointer to our group
+	size_t local_id = get_local_id(0);
+	size_t local_size = get_local_size(0);
 	keys += groupSize * get_group_id(0);
-	int matrixRow = get_local_size(0) * get_group_id(0);
+	int matrixRow = local_size * get_group_id(0);
 	offsets += matrixRow;
 	sizes += matrixRow; 
 
-	key_t sample = samples[get_local_id(0)];
+	key_t sample = samples[local_id];
 
 	// now perform binary search for sample
 	int l = 0;
@@ -56,15 +61,15 @@ __kernel void bucket_index_samples(__global const key_t* keys, __global const ke
 	pos = r;
 
 	// write our result back
-	offsets[get_local_id(0)] = (pos != -1) ? pos : r+1;
+	offsets[local_id] = (pos != -1) ? pos : r+1;
 
 	// now calculate sizes
 	barrier(CLK_GLOBAL_MEM_FENCE);
-	if(get_local_id(0) != get_local_size(0) - 1)
-		sizes[get_local_id(0)] = offsets[get_local_id(0) + 1] - offsets[get_local_id(0)];
+	if(local_id != local_size - 1)
+		sizes[local_id] = offsets[local_id + 1] - offsets[local_id];
 	else
 		// next element would be at position groupSize
-		sizes[get_local_id(0)] = groupSize - offsets[get_local_id(0)];
+		sizes[local_id] = groupSize - offsets[local_id];
 }
 
 // TODO: use proper scan!
