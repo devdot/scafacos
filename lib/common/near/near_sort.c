@@ -85,6 +85,8 @@ static const char *fcs_ocl_cl_sort_config =
   "#define BITONIC_GLOBAL_8 " STR(FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_8) "\n"
   "#define BITONIC_GLOBAL_16 " STR(FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_16) "\n"
   "#define BITONIC_GLOBAL_32 " STR(FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32) "\n"
+
+  "#define BUCKET_INDEXER_LOCAL " STR(FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL) "\n"
   ;
   // built in Makefile.am/.in  like near.cl_str.h
 static const char* fcs_ocl_cl_sort =
@@ -1985,6 +1987,9 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 2, sizeof(cl_mem), &mem_sample_matrix_offsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 3, sizeof(cl_mem), &mem_sample_matrix_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 4, sizeof(workgroupSortSize), &workgroupSortSize));
+#if FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 5, sizeof(sort_key_t) * workgroupSortSize, NULL));
+#endif // FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL
 
     // and run the sampler again
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #6 sample indexing\n"););

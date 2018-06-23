@@ -16,14 +16,36 @@ __kernel void bucket_sample(__global const key_t* keys, int dist, __global key_t
 // returns the next bigger element when the searched sample was not found
 // global size: matrix size = buckets * sort groups
 // local size: buckets
-__kernel void bucket_index_samples(__global const key_t* keys, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize) {
+__kernel void bucket_index_samples(__global const key_t* keysGlobal, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize
+#if BUCKET_INDEXER_LOCAL
+	, __local key_t* buffer
+#endif // BUCKET_INDEXER_LOCAL
+) {
 	// offset the keys and matrix pointer to our group
 	size_t local_id = get_local_id(0);
 	size_t local_size = get_local_size(0);
-	keys += groupSize * get_group_id(0);
-	int matrixRow = local_size * get_group_id(0);
+	size_t group_id = get_group_id(0);
+	
+	int matrixRow = local_size * group_id;
 	offsets += matrixRow;
-	sizes += matrixRow; 
+	sizes += matrixRow;
+
+
+	// load elements into buffer if necessary
+	keysGlobal += groupSize * group_id;
+#if BUCKET_INDEXER_LOCAL
+	__local key_t* keys = buffer;
+	int quota = groupSize / local_size;
+	// load coalesced
+	for(int i = 0; i < quota; i++) {
+		int index = local_id + local_size * i;
+		buffer[index] = keysGlobal[index];
+	}
+	// sync all threads now
+	barrier(CLK_GLOBAL_MEM_FENCE);
+#else // BUCKET_INDEXER_LOCAL
+	__global key_t * keys = keysGlobal;
+#endif // BUCKET_INDEXER_LOCAL
 
 	key_t sample = samples[local_id];
 
