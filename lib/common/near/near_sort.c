@@ -2006,6 +2006,20 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   unsigned int* bucketOffsets    = malloc(globalSampleNum * sizeof(int));
   cl_mem mem_bucketOffsets;
   {
+    size_t local_size_columns = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+    while(local_size_columns > workgroupSortNum) {
+      local_size_columns /= 2;
+    }
+    unsigned int quota = 2 * (workgroupSortNum / local_size_columns);
+    // when threads are matched by local size, decrease quota only if the local_size can't be decrease
+    if(workgroupSortNum % local_size_columns == 0) {
+      if(local_size_columns > 1)
+        local_size_columns /= 2;
+      else
+        quota /= 2;
+    }
+
+    const size_t global_size_columns = local_size_columns * globalSampleNum;
     const size_t global_size = globalSampleNum;
 
     // create buffers
@@ -2016,6 +2030,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     // set kernel arguments
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 1, sizeof(int), &workgroupSortNum));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 2, sizeof(int), &quota));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 1, globalSampleNum * sizeof(int), NULL));
@@ -2025,8 +2040,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 5, sizeof(int), &workgroupSortNum));
 
     // now run the prefix sum
-    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #7 prefix sum\n"););
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_prefix_columns, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+    INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #7 prefix sum (%ld groups each %ld items, scan quota %d)\n", global_size_columns / local_size_columns, local_size_columns, quota););
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_prefix_columns, 1, NULL, &global_size_columns, &local_size_columns, 0, NULL, &ocl->sort_kernel_completion));
     CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(35, ocl->sort_kernel_completion, "bucket_prefix_columns");
 

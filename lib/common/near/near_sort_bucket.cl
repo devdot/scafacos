@@ -94,20 +94,82 @@ __kernel void bucket_index_samples(__global const key_t* keysGlobal, __global co
 		sizes[local_id] = groupSize - offsets[local_id];
 }
 
-// TODO: use proper scan!
-// one thread per column
-__kernel void bucket_prefix_columns(__global int* matrix, const int rows) {
+// one group per column (bucket)
+// quota has to be 2 or power of 2 (if it's one, up to half of all workitems won't do any work)
+// matrix is [m x b], where m is sort groups (subarrays) and b is buckets
+__kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsigned int quota) {
 	// each thread will do one column
-	int index = get_global_id(0);
-	int cols = get_global_size(0);
+	size_t group_id = get_group_id(0);
+	size_t local_id = get_local_id(0);
+	size_t local_id_orig = local_id;
+	size_t global_size = get_global_size(0);
+	size_t local_size = get_local_size(0);
 
-	int last = matrix[index];
+	int cols = global_size / local_size;
 
-	for(int row = 1; row < rows; row++) {
-		index += cols;
+	// calculate offset
+	int n = local_size * quota;
+	int offset = n - rows;
 
-		last += matrix[index];
-		matrix[index] = last;
+	// first, shift matrix to our column
+	matrix += group_id;
+
+	// now divide quota by two (when possible)
+	// this can be done because the scan needs only one thread per two items, no need to simulate the upper half of threads
+	if(quota > 1)
+		quota >>= 1;
+
+	// do the blelloch scan with quota
+	// offset is simulated to be on the left, containing zeros
+	// upsweep
+	int dist = 1;
+	for(int d = n >> 1; d > 0; d >>= 1) {
+		// go through the quota amount of blocks
+		for(int i = 0; i < quota; i++) {
+			if(local_id < d) {
+				int ai = (dist * (2 * local_id + 1) - 1) - offset;
+				int bi = (dist * (2 * local_id + 2) - 1) - offset;
+
+				// only add when were not in offset, bi is always greater than ai
+				if(ai >= 0)
+					matrix[bi * cols] += matrix[ai * cols];
+			}
+			// go to next local id in quota
+			local_id += local_size;
+		}
+		local_id = local_id_orig;
+        dist <<= 1;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+	}
+
+	// insert 0 with one thread
+	if(local_id == 0) {
+		matrix[(rows - 1) * cols] = 0;
+	}
+
+	// downsweep
+	for(int d = 1; d < n; d <<= 1) {
+		dist >>= 1;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+		// handle quota, now right to left
+		local_id += quota * local_size;
+		for(int i = quota; i > 0; i--) {
+			// decrement right away, start one to high
+			local_id -= local_size;
+			if(local_id < d) {
+				int ai = (dist * (2 * local_id + 1) - 1) - offset;
+				int bi = (dist * (2 * local_id + 2) - 1) - offset;
+
+				// check if ai is negative, if so we don't need to do anything
+				if(ai >= 0) {
+					ai *= cols;
+					bi *= cols;
+					int tmp =  matrix[ai];
+					matrix[ai] = matrix[bi];
+					matrix[bi] += tmp;
+				}
+			}
+		}
 	}
 }
 
