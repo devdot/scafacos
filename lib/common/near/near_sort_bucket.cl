@@ -235,47 +235,72 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	bucketContainerPrefix[i] = bufferContainerPrefix[i];
 }
 
-// one thread per row (and bucket)
-// global size is number of rows (is called bucket-wise)
-__kernel void bucket_relocate(__global key_t* keys,
-    __global index_t* index,
-    __global key_t* bucket_keys,
-    __global index_t* bucket_index,
-    const int bucketNum,
-    const int cols,
-    const int elementsPerRow,
-    __global const int* bucketInnerOffsets,
-    __global const int* matrixOffsets,
-    __global const int* matrixPrefix)
-{
-	int rows = get_global_size(0);
-	int row = get_global_id(0);
-	
-	// offset the matrix
-	__global const int* rowOffsets = matrixOffsets + row * cols;
+// quota workitems per row
+// one group per sort group (subarray)
+__kernel void bucket_relocate(__global key_t* keysIn,
+	__global index_t* indexIn,
+	__global key_t* keysOut,
+	__global index_t* indexOut,
+	const int quota,
+	const int bucketsNum,
+	__local int*  bufferPartitionOffset,
+	__global int* matrixPartitionOffset,
+	__global int* matrixBucketOffset,
+	__global int* bucketContainerInnerOffsets,
+	__global int* bucketContainerOffsets
+) {
+	size_t local_id = get_local_id(0);
+	size_t local_size = get_local_size(0);
+	// group id is number of sort group, row in matrices
+	size_t group_id = get_group_id(0);
 
-	// calculate the offset in global
-	// offset of the row in global arrays
-	int globalOffset = row * elementsPerRow;
-	// offset of the bucket within the row
-	globalOffset += rowOffsets[bucketNum];
+	// offset input array to group
+	int globalOffset = local_size * quota * group_id;
+	keysIn += globalOffset;
+	indexIn += globalOffset;
 
-	// now calculate the size of this partition
-	int size = ((bucketNum < cols -1) ? rowOffsets[bucketNum + 1] : elementsPerRow) - rowOffsets[bucketNum];
+	// offset matrices
+	matrixPartitionOffset += group_id * bucketsNum;
+	matrixBucketOffset += (group_id - 1) * bucketsNum;
 
-	// and calculate the offset within the bucket
-	int bucketOffset = bucketInnerOffsets[bucketNum];
-	// the 0th row contains the offset for the first row (because it's the size of the 0th row)
-	bucketOffset += (row == 0) ? 0 : matrixPrefix[(row - 1) * cols + bucketNum];
+	// load partition prefix into local memory
+	int i = local_id;
+	while(i < bucketsNum) {
+		bufferPartitionOffset[i] = matrixPartitionOffset[i];
+		i += local_size;
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
 
-	// now move data
-	keys += globalOffset;
-    index += globalOffset;
-	bucket_keys += bucketOffset;
-	bucket_index += bucketOffset;
+	if(group_id == 0 && local_id == 0) {
+		for(int i = 0; i < bucketsNum; i++) {
+			//printf("%d: %d\n", i, bufferPartitionOffset[i]);
+		}
+	}
 
-	for(int i = 0; i < size; i++) {
-		bucket_keys[i]  = keys[i];
-        bucket_index[i] = index[i];
-    }
+	// do this for each quota elements
+	unsigned int bucket;
+	int bucketOffset;
+	for(i = 0; i < quota; i++) {
+		// figure out which bucket we belong to
+		bucket = 1;
+		for(; bucket < bucketsNum; bucket++) {
+			if(local_id < bufferPartitionOffset[bucket]) {
+				break;
+			}
+		}
+		bucket--;
+
+		// calculate the offset of this element in the bucket arrays
+		bucketOffset = bucketContainerInnerOffsets[bucket] + bucketContainerOffsets[bucket]; // TODO calc in local
+		bucketOffset += local_id - bufferPartitionOffset[bucket];
+		// rows in this matrix are offset by one
+		bucketOffset += (group_id == 0) ? 0 : matrixBucketOffset[bucket];
+
+		// now we got both offsets, just copy
+		keysOut[bucketOffset] = keysIn[local_id];
+		indexOut[bucketOffset] = indexIn[local_id];
+
+		// increase local_id
+		local_id += local_size;
+	}
 }

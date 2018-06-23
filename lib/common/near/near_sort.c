@@ -2132,35 +2132,36 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     // set kernel args
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 0, sizeof(cl_mem), &mem_keys));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 1, sizeof(cl_mem), &mem_index));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 5, sizeof(int), &globalSampleNum));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 6, sizeof(int), &workgroupSortSize));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_bucketInnerOffsets));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 8, sizeof(cl_mem), &mem_sample_matrix_offsets));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 9, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 2, sizeof(cl_mem), &mem_bucket_keys));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 3, sizeof(cl_mem), &mem_bucket_index));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 4, sizeof(workgroupSortQuota), &workgroupSortQuota));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 5, sizeof(globalSampleNum), &globalSampleNum));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 6, globalSampleNum * sizeof(int), NULL));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_sample_matrix_offsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 8, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 9, sizeof(cl_mem), &mem_bucketInnerOffsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 10, sizeof(cl_mem), &mem_bucketContainerOffsets));
+
+    size_t global_size = n / workgroupSortQuota;
+    size_t local_size = workgroupSortLocalSize;
 
     // run relocation kernels
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #8 relocate into buckets\n"););
 
-    // go through all the buckets
-    size_t global_size = workgroupSortNum; 
+    // run the kernel
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_relocate, 1, NULL, &global_size, &local_size, 0, NULL, &ocl->sort_kernel_completion));
+    CL_CHECK(T_CL_FINISH(ocl->command_queue));
+    T_KERNEL(38, ocl->sort_kernel_completion, "bucket_relocate");
+
+    // go through all buckets for filling
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
       if(bucketContainers[i] == 0)
         continue;
-
-      // set specific arguments
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 2, sizeof(cl_mem), &mems_bucket_keys[i]));
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 3, sizeof(cl_mem), &mems_bucket_index[i]));
-      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 4, sizeof(int), &i));
 
       // fill the buffer with zeros
       CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mems_bucket_keys[i], &zero, sizeof(zero), 0, bucketInnerOffsets[i] * sizeof(sort_key_t), 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(T_CL_FINISH(ocl->command_queue));
       T_KERNEL(37, ocl->sort_kernel_completion, "bucket_relocate_fill");
-
-      // run the kernel
-      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_relocate, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
-      CL_CHECK(T_CL_FINISH(ocl->command_queue));
-      T_KERNEL(38, ocl->sort_kernel_completion, "bucket_relocate");
     }
     // let the step finish
     CL_CHECK(clFinish(ocl->command_queue));
@@ -2314,8 +2315,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clReleaseMemObject(mems_bucket_keys[i]));
     CL_CHECK(clReleaseMemObject(mems_bucket_index[i]));
   }
-  free(mem_bucket_keys);
-  free(mem_bucket_index);
+  CL_CHECK(clReleaseMemObject(mem_bucket_keys));
+  CL_CHECK(clReleaseMemObject(mem_bucket_index));
   free(bucketPositions);
   free(bucketContainers);
   free(bucketInnerOffsets);
