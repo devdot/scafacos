@@ -2001,10 +2001,13 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
  
   // step #7 prefix sum
   T_START(17, "prefix_sum");
-  unsigned int* bucketPositions  = malloc(globalSampleNum * sizeof(int));
-  unsigned int* bucketContainers = malloc(globalSampleNum * sizeof(int));
-  unsigned int* bucketOffsets    = malloc(globalSampleNum * sizeof(int));
-  cl_mem mem_bucketOffsets;
+  unsigned int* bucketPositions         = malloc(globalSampleNum * sizeof(int));
+  unsigned int* bucketContainers        = malloc(globalSampleNum * sizeof(int));
+  unsigned int* bucketInnerOffsets      = malloc(globalSampleNum * sizeof(int));
+  unsigned int* bucketContainerOffsets  = malloc(globalSampleNum * sizeof(int));
+  size_t bucketsTotalElementSize;
+  cl_mem mem_bucketInnerOffsets;
+  cl_mem mem_bucketContainerOffsets;
   {
     size_t local_size_columns = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
     while(local_size_columns > workgroupSortNum) {
@@ -2025,7 +2028,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     // create buffers
     cl_mem mem_bucketPositions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketPositions, &_err));
     cl_mem mem_bucketContainers = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketContainers, &_err));
-    mem_bucketOffsets           = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketOffsets, &_err));
+    mem_bucketInnerOffsets      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketInnerOffsets, &_err));
+    mem_bucketContainerOffsets  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketContainerOffsets, &_err));
 
     // set kernel arguments
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
@@ -2034,10 +2038,12 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 1, globalSampleNum * sizeof(int), NULL));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 2, sizeof(cl_mem), &mem_bucketPositions));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 3, sizeof(cl_mem), &mem_bucketContainers));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 4, sizeof(cl_mem), &mem_bucketOffsets));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 5, sizeof(int), &workgroupSortNum));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 2, globalSampleNum * sizeof(int), NULL));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 3, sizeof(cl_mem), &mem_bucketPositions));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 4, sizeof(cl_mem), &mem_bucketContainers));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 5, sizeof(cl_mem), &mem_bucketInnerOffsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 6, sizeof(cl_mem), &mem_bucketContainerOffsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 7, sizeof(int), &workgroupSortNum));
 
     // now run the prefix sum
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #7 prefix sum (%ld groups each %ld items, scan quota %d)\n", global_size_columns / local_size_columns, local_size_columns, quota););
@@ -2054,7 +2060,11 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: read back bucket info\n"););
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_bucketPositions, CL_FALSE, 0, globalSampleNum * sizeof(int), bucketPositions, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_bucketContainers, CL_FALSE, 0, globalSampleNum * sizeof(int), bucketContainers, 0, NULL, NULL));
-    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_bucketOffsets, CL_TRUE, 0, globalSampleNum * sizeof(int), bucketOffsets, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_bucketInnerOffsets, CL_FALSE, 0, globalSampleNum * sizeof(int), bucketInnerOffsets, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_bucketContainerOffsets, CL_TRUE, 0, globalSampleNum * sizeof(int), bucketContainerOffsets, 0, NULL, NULL));
+
+    // calculate total amount of elements
+    bucketsTotalElementSize = bucketContainerOffsets[globalSampleNum - 1] + bucketContainers[globalSampleNum - 1];
 
     // free bucket info buffers
     CL_CHECK(clReleaseMemObject(mem_bucketPositions));
@@ -2071,19 +2081,20 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 #endif // FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
 
   INFO_CMD(
-    printf(INFO_PRINT_PREFIX "ocl-bucket: buckets: [(%d, %d)", bucketContainers[0] - bucketOffsets[0], bucketContainers[0]);
+    printf(INFO_PRINT_PREFIX "ocl-bucket: buckets: [(%d, %d)", bucketContainers[0] - bucketInnerOffsets[0], bucketContainers[0]);
     for(int i = 1; i < globalSampleNum; i++) {
-      printf(", (%d, %d)", bucketContainers[i] - bucketOffsets[i], bucketContainers[i]);
+      printf(", (%d, %d)", bucketContainers[i] - bucketInnerOffsets[i], bucketContainers[i]);
     }
     printf("]\n");
     if(skipFirstBucket)
       printf(INFO_PRINT_PREFIX "ocl-bucket: skip bucket #0\n");
+    printf(INFO_PRINT_PREFIX "ocl-bucket: buckets total offsets %ld => %ld\n", n, bucketsTotalElementSize);
   );
 
   // check whether the first bucket is skipped wrongly
 #ifdef DO_CHECK
-  if(skipFirstBucket && bucketContainers[0] - bucketOffsets[0] != offset) {
-    printf("error with skipping first bucket: has size %d but offset is %ld\n", bucketContainers[0] - bucketOffsets[0], offset);
+  if(skipFirstBucket && bucketContainers[0] - bucketInnerOffsets[0] != offset) {
+    printf("error with skipping first bucket: has size %d but offset is %ld\n", bucketContainers[0] - bucketInnerOffsets[0], offset);
     abort();
   }
 #endif // DO_CHECK
@@ -2092,15 +2103,30 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   T_START(18, "relocate");
   cl_mem* mems_bucket_keys  = malloc(globalSampleNum * sizeof(cl_mem));
   cl_mem* mems_bucket_index = malloc(globalSampleNum * sizeof(cl_mem));
+  cl_mem mem_bucket_keys;
+  cl_mem mem_bucket_index;
   {
-    const size_t global_size = workgroupSortNum;
+    // allocate memory for buckets in one piece each
+    mem_bucket_keys   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, bucketsTotalElementSize * sizeof(sort_key_t), NULL, &_err));
+    mem_bucket_index  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, bucketsTotalElementSize * sizeof(sort_index_t), NULL, &_err));
 
     // create buffers for each bucket
+    cl_buffer_region region = {0, 0};
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
       if(bucketContainers[i] == 0)
         continue;
-      mems_bucket_keys[i]   = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, bucketContainers[i] * sizeof(sort_key_t), NULL, &_err));
-      mems_bucket_index[i]  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, bucketContainers[i] * sizeof(sort_index_t), NULL, &_err));
+      
+      // calculate region
+      region.origin = bucketContainerOffsets[i] * sizeof(sort_key_t);
+      region.size  = bucketContainers[i] * sizeof(sort_key_t);
+
+      mems_bucket_keys[i]   = CL_CHECK_ERR(clCreateSubBuffer(mem_bucket_keys, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+      // recalculate if needed
+      if(sizeof(sort_key_t) != sizeof(sort_index_t)) {
+        region.origin = bucketContainerOffsets[i] * sizeof(sort_index_t);
+        region.size  = bucketContainers[i] * sizeof(sort_index_t);
+      }
+      mems_bucket_index[i]  = CL_CHECK_ERR(clCreateSubBuffer(mem_bucket_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
     }
 
     // set kernel args
@@ -2108,7 +2134,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 1, sizeof(cl_mem), &mem_index));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 5, sizeof(int), &globalSampleNum));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 6, sizeof(int), &workgroupSortSize));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_bucketOffsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_bucketInnerOffsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 8, sizeof(cl_mem), &mem_sample_matrix_offsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 9, sizeof(cl_mem), &mem_sample_matrix_prefix));
 
@@ -2116,6 +2142,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #8 relocate into buckets\n"););
 
     // go through all the buckets
+    size_t global_size = workgroupSortNum; 
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
       if(bucketContainers[i] == 0)
         continue;
@@ -2126,7 +2153,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 4, sizeof(int), &i));
 
       // fill the buffer with zeros
-      CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mems_bucket_keys[i], &zero, sizeof(zero), 0, bucketOffsets[i] * sizeof(sort_key_t), 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mems_bucket_keys[i], &zero, sizeof(zero), 0, bucketInnerOffsets[i] * sizeof(sort_key_t), 0, NULL, &ocl->sort_kernel_completion));
       CL_CHECK(T_CL_FINISH(ocl->command_queue));
       T_KERNEL(37, ocl->sort_kernel_completion, "bucket_relocate_fill");
 
@@ -2142,7 +2169,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
   // release the buffers that are not needed anymore
   CL_CHECK(clReleaseMemObject(mem_samples));
-  CL_CHECK(clReleaseMemObject(mem_bucketOffsets));
+  CL_CHECK(clReleaseMemObject(mem_bucketInnerOffsets));
+  CL_CHECK(clReleaseMemObject(mem_bucketContainerOffsets));
   CL_CHECK(clReleaseMemObject(mem_sample_matrix_offsets));
   CL_CHECK(clReleaseMemObject(mem_sample_matrix_prefix));
   // keys are now split into buckets, aren't needed anymore (data index is required for moving data)
@@ -2243,7 +2271,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     int skippedBuckets = skipFirstBucket;
 
     for(unsigned int i = skipFirstBucket; i < globalSampleNum; i++) {
-      unsigned int real_size = bucketContainers[i] - bucketOffsets[i];
+      unsigned int real_size = bucketContainers[i] - bucketInnerOffsets[i];
 
       if(real_size == 0) {
         skippedBuckets++;
@@ -2258,8 +2286,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       }
 
       // queue the read for keys and copy for data index
-      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mems_bucket_keys[i], CL_FALSE, (bucketOffsets[i] + remainingOffset) * sizeof(sort_key_t), (real_size - remainingOffset) * sizeof(sort_key_t), bucketPosKeys, 0, NULL, NULL));
-      CL_CHECK(clEnqueueCopyBuffer(ocl->command_queue, mems_bucket_index[i], mem_index, (bucketOffsets[i] + remainingOffset) * sizeof(sort_index_t), (indexOffset + remainingOffset) * sizeof(sort_index_t), (real_size - remainingOffset) * sizeof(sort_index_t), 0, NULL, NULL));
+      CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mems_bucket_keys[i], CL_FALSE, (bucketInnerOffsets[i] + remainingOffset) * sizeof(sort_key_t), (real_size - remainingOffset) * sizeof(sort_key_t), bucketPosKeys, 0, NULL, NULL));
+      CL_CHECK(clEnqueueCopyBuffer(ocl->command_queue, mems_bucket_index[i], mem_index, (bucketInnerOffsets[i] + remainingOffset) * sizeof(sort_index_t), (indexOffset + remainingOffset) * sizeof(sort_index_t), (real_size - remainingOffset) * sizeof(sort_index_t), 0, NULL, NULL));
 
       // index is offset by 1 (pos 0 contains offset for bucket 1)
       bucketPosKeys = &keys[bucketPositions[i] - offset];
@@ -2286,9 +2314,12 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clReleaseMemObject(mems_bucket_keys[i]));
     CL_CHECK(clReleaseMemObject(mems_bucket_index[i]));
   }
+  free(mem_bucket_keys);
+  free(mem_bucket_index);
   free(bucketPositions);
   free(bucketContainers);
-  free(bucketOffsets);
+  free(bucketInnerOffsets);
+  free(bucketContainerOffsets);
   free(mems_bucket_keys);
   free(mems_bucket_index);
 

@@ -16,7 +16,7 @@ __kernel void bucket_sample(__global const key_t* keys, int dist, __global key_t
 // returns the next bigger element when the searched sample was not found
 // global size: matrix size = buckets * sort groups
 // local size: buckets
-__kernel void bucket_index_samples(__global const key_t* keysGlobal, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize
+__kernel void bucket_index_samples(__global key_t* keysGlobal, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize
 #if BUCKET_INDEXER_LOCAL
 	, __local key_t* buffer
 #endif // BUCKET_INDEXER_LOCAL
@@ -170,10 +170,12 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 
 // one thread per column
 __kernel void bucket_prefix_final(__global const int* matrix,
-	__local int* row,
+	__local unsigned int* row,
+	__local unsigned int* bufferContainerPrefix,
 	__global unsigned int* bucketPos,
 	__global unsigned int* bucketContainers,
-	__global unsigned int* bucketOffsets,
+	__global unsigned int* bucketInnerOffsets,
+	__global unsigned int* bucketContainerPrefix,
 	const int rows)
 {
 	int i = get_local_id(0);
@@ -189,37 +191,48 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	// we got the sizes of each bucket in row
 
 	// find the next bigger power of 2 for container size
-	int container = 1;
-	while(container < row[i])
-		container <<= 1;
+	bufferContainerPrefix[i] = 1;
+	while(bufferContainerPrefix[i] < row[i])
+		bufferContainerPrefix[i] <<= 1;
 
 	// fix 0 size buckets (should not happen too much though because that kills performance)
 	if(row[i] == 0)
-		container = 0;
+		bufferContainerPrefix[i] = 0;
 
-	bucketContainers[i] = container;
+	bucketContainers[i] = bufferContainerPrefix[i];
 
 	// and calculate the offset within the container
-	bucketOffsets[i] = container - row[i];
+	bucketInnerOffsets[i] = bufferContainerPrefix[i] - row[i];
 
 	// now sum up the positions
 	int j;
-	int temp;
+	unsigned int temp, tempContainer;
+	// prepare prefix sum of container
+	// move all elements one to the left and insert 0 at start
+	j = i - 1;
+	tempContainer = j < 0 ? 0 : bufferContainerPrefix[j];
+	barrier(CLK_LOCAL_MEM_FENCE);
+	bufferContainerPrefix[i] = tempContainer;
+
 	for(int dist = 1; dist < cols; dist <<= 1) {
 		j = i + dist;
 		
 		// make sure we don't read and write at the same time
 		temp = row[i];
+		tempContainer = bufferContainerPrefix[i];
 		barrier(CLK_LOCAL_MEM_FENCE);
 
-		if(j < cols)
+		if(j < cols) {
 			row[j] += temp;
+			bufferContainerPrefix[j] += tempContainer;
+		}
 
 		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 
-	// save back to array
+	// save back to global arrays
 	bucketPos[i] = row[i];
+	bucketContainerPrefix[i] = bufferContainerPrefix[i];
 }
 
 // one thread per row (and bucket)
