@@ -2013,7 +2013,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     while(local_size_columns > workgroupSortNum) {
       local_size_columns /= 2;
     }
-    unsigned int quota = 2 * (workgroupSortNum / local_size_columns);
+    unsigned int quota = fcs_ocl_helper_next_power_of_2(2 * (workgroupSortNum / local_size_columns));
     // when threads are matched by local size, decrease quota only if the local_size can't be decrease
     if(workgroupSortNum % local_size_columns == 0) {
       if(local_size_columns > 1)
