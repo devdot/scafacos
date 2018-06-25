@@ -63,6 +63,8 @@ extern "C" {
 // configuration for bucket sort
 #define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1
 #define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    0 // slower according to benchmarks
+#define FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES    32
+#define FCS_NEAR_OCL_SORT_BUCKET_GLOBAL_SAMPLES   64
 #define FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET       1
 // set only either to true
 #define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES     0

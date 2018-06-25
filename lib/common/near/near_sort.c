@@ -1733,8 +1733,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   size_t offset = n - nlocal;
 
   // params
-  const unsigned int localSampleNum  = 32;
-  const unsigned int globalSampleNum = 64;
+  const unsigned int localSampleNum  = FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES;
+  const unsigned int globalSampleNum = FCS_NEAR_OCL_SORT_BUCKET_GLOBAL_SAMPLES;
 
   INFO_CMD(
     printf(INFO_PRINT_PREFIX "ocl-bucket: GPU Bucket Sort [%ld] => [%ld]\n", nlocal, n);
