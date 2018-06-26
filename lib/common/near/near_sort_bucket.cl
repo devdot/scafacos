@@ -290,6 +290,12 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 		}
 		bucket--;
 
+#if BUCKET_SKIP_FIRST
+		// only skip the first bucket when it's really set as empty
+		if(bucket == 0 && bucketContainerOffsets[1] == 0)
+			continue;
+#endif // BUCKET_SKIP_FIRST
+
 		// calculate the offset of this element in the bucket arrays
 		bucketOffset = bucketContainerInnerOffsets[bucket] + bucketContainerOffsets[bucket]; // TODO calc in local
 		bucketOffset += local_id - bufferPartitionOffset[bucket];
