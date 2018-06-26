@@ -32,6 +32,7 @@ extern "C" {
  * TOGGLES
  */
 
+#define FCS_NEAR_OCL_SORT_USE_INDEX           1
 #define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0
 #define FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO     1
 #define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 32 // 2^25, only when moving data on gpu

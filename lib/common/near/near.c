@@ -814,9 +814,6 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   // set values to initial settings
   ocl->buffers_on_device = 0;
   ocl->buffers_on_device_ghost = 0;
-
-  // set usage of index to 1
-  ocl->use_index = 1;
 #endif
 
   cl_int ret;

@@ -84,8 +84,6 @@ typedef struct
   int buffers_on_device;
   int buffers_on_device_ghost;
 
-  int use_index;
-
   cl_device_id device_id;
 
   cl_ulong global_memory;
