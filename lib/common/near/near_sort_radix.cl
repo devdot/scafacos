@@ -188,11 +188,11 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 // works on 2D workitems!
 // tilesize is "quota" for this kernel
 __kernel void radix_transpose(const __global key_t* keysIn,
-    const __global key_t* keysOut,
+    __global key_t* keysOut,
     const __global index_t* dataIn,
-    const __global index_t* dataOut,
-    const __local key_t* keysBuffer,
-    const __local index_t* dataBuffer,
+    __global index_t* dataOut,
+    __local key_t* keysBuffer,
+    __local index_t* dataBuffer,
     const int cols,
     const int rows,
     const int tilesize
@@ -221,7 +221,7 @@ __kernel void radix_transpose(const __global key_t* keysIn,
     // first row in transpose
     // move cache to out array
     for(int i = 0; i < tilesize; i++) {
-        pos = (row0 + i) * rows + rowIn + local_id1;
+        pos = (rowOut + i) * rows + rowIn + local_id1;
         posBuffer = (local_id1 * tilesize) + i;
 
         keysOut[pos] = keysBuffer[posBuffer];

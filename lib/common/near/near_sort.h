@@ -48,8 +48,8 @@ extern "C" {
 // configuration for radix sort
 #define FCS_NEAR_OCL_SORT_RADIX           4
 #define FCS_NEAR_OCL_SORT_RADIX_BITS      2
-#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     1
-#define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1
+#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     4
+#define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1 // only when quota > 1 !!
 #define FCS_NEAR_OCL_SORT_RADIX_SCALE     1
 
 // configuration for bitonic sort
