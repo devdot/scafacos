@@ -37,8 +37,11 @@ __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* 
     key_t key, shortkey;
 
     for(int i = 0; i < quota; i++) {
-        // arrays are in row-major-order
+#if RADIX_TRANSPOSE
+        index = workgroups * local_workitems * i + global_id;
+#else 
         index = offset + i;
+#endif // RADIX_TRANSPOSE
 
         key = keys[index];
 
@@ -151,7 +154,11 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
     int indexOut;
     key_t key, shortkey;
     for(int i = 0; i < quota; i++) {
+#if RADIX_TRANSPOSE
+        index = workgroups * local_workitems * i + global_id;
+#else
         index = i + offset;
+#endif // RADIX_TRANSPOSE
 
         key = keysIn[index];
         
@@ -159,7 +166,14 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         shortkey = ((key >> (pass * RADIX_BITS)) & (RADIX - 1));
         
         // calculate the index for the out array
+#if RADIX_TRANSPOSE
+        int indexOutTmp = local_histograms[shortkey * local_workitems + local_id];
+        int t1 = indexOutTmp / (n / workgroups / local_workitems);
+        int t2 = indexOutTmp % (n / workgroups / local_workitems);
+        indexOut = t2 * (workgroups * local_workitems) + t1;
+#else
         indexOut = local_histograms[shortkey * local_workitems + local_id];
+#endif // RADIX_TRANSPOSE
 
         // write
         keysOut[indexOut] = key;
@@ -169,3 +183,49 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         local_histograms[shortkey * local_workitems + local_id]++;
     }
 }
+
+#if RADIX_TRANSPOSE
+// works on 2D workitems!
+// tilesize is "quota" for this kernel
+__kernel void radix_transpose(const __global key_t* keysIn,
+    const __global key_t* keysOut,
+    const __global index_t* dataIn,
+    const __global index_t* dataOut,
+    const __local key_t* keysBuffer,
+    const __local index_t* dataBuffer,
+    const int cols,
+    const int rows,
+    const int tilesize
+    )
+{
+    size_t global_id0 = get_global_id(0); 
+    size_t global_id1 = get_global_id(1); // column
+    size_t local_id1 = get_local_id(1); // local column
+    size_t group_id1 = get_group_id(1);
+
+    int rowIn = global_id0 * tilesize; // first row
+    int rowOut = group_id1 * tilesize; // first row transposed
+
+    // fill cache
+    int pos, posBuffer;
+    for(int i = 0; i < tilesize; i++) {
+        pos = (rowIn + i) * cols + global_id1;
+        posBuffer = (i * tilesize) + local_id1;
+
+        keysBuffer[posBuffer] = keysIn[pos];
+        dataBuffer[posBuffer] = dataIn[pos];
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // first row in transpose
+    // move cache to out array
+    for(int i = 0; i < tilesize; i++) {
+        pos = (row0 + i) * rows + rowIn + local_id1;
+        posBuffer = (local_id1 * tilesize) + i;
+
+        keysOut[pos] = keysBuffer[posBuffer];
+        dataOut[pos] = dataBuffer[posBuffer];
+    }
+}
+#endif // RADIX_TRANSPOSE

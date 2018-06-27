@@ -46,9 +46,11 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
 
 // configuration for radix sort
-#define FCS_NEAR_OCL_SORT_RADIX       4
-#define FCS_NEAR_OCL_SORT_RADIX_BITS  2
-#define FCS_NEAR_OCL_SORT_RADIX_SCALE 1
+#define FCS_NEAR_OCL_SORT_RADIX           4
+#define FCS_NEAR_OCL_SORT_RADIX_BITS      2
+#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     1
+#define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1
+#define FCS_NEAR_OCL_SORT_RADIX_SCALE     1
 
 // configuration for bitonic sort
 #define FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_4  1

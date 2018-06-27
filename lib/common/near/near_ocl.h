@@ -112,6 +112,7 @@ typedef struct
   cl_kernel sort_kernel_radix_scan;
   cl_kernel sort_kernel_radix_scan_global;
   cl_kernel sort_kernel_radix_reorder;
+  cl_kernel sort_kernel_radix_transpose;
 
   cl_kernel sort_kernel_move_data_float;
   cl_kernel sort_kernel_move_data_float_triple;

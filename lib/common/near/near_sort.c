@@ -74,6 +74,7 @@ static const char *fcs_ocl_cl_sort_config =
 
   "#define RADIX " STR(FCS_NEAR_OCL_SORT_RADIX) "\n"
   "#define RADIX_BITS " STR(FCS_NEAR_OCL_SORT_RADIX_BITS) "\n"
+  "#define RADIX_TRANSPOSE" STR(FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE) "\n"
   "#define RADIX_SCALE " STR(FCS_NEAR_OCL_SORT_RADIX_SCALE) "\n"
   "#define HYBRID_INDEX_GLOBAL " STR(FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL) "\n"
   "#define HYBRID_COALESCE " STR(FCS_NEAR_OCL_SORT_HYBRID_COALESCE) "\n"
@@ -552,6 +553,9 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
   ocl->sort_kernel_radix_histogram_paste    = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_histogram_paste", &_err));
   ocl->sort_kernel_radix_scan               = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_scan", &_err));
   ocl->sort_kernel_radix_reorder            = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_reorder", &_err));
+#if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+  ocl->sort_kernel_radix_transpose          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_transpose", &_err));
+#endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
 
   ocl->sort_kernel_init_index               = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "init_index", &_err));
   ocl->sort_kernel_move_data_float          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "move_data_float", &_err));
@@ -594,9 +598,9 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   size_t n = (nlocal % local_size == 0)? nlocal : nlocal + local_size - (nlocal % local_size);
   size_t offset = n - nlocal;
 
-  size_t histogram_size = FCS_NEAR_OCL_SORT_RADIX * n;
-  const size_t global_size_histogram  = n;
-  const size_t local_size_histogram   = local_size;
+  size_t histogram_size = FCS_NEAR_OCL_SORT_RADIX * (n / FCS_NEAR_OCL_SORT_RADIX_QUOTA);
+  const size_t global_size_histogram  = n / FCS_NEAR_OCL_SORT_RADIX_QUOTA;
+  const size_t local_size_histogram   = local_size / FCS_NEAR_OCL_SORT_RADIX_QUOTA;
 
 #if FCS_NEAR_OCL_SORT_RADIX_SCALE
   // calculate the amount of scan levels that are needed
@@ -676,13 +680,26 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   const size_t local_size_histogram_paste  = scan_size / 2;
 #endif // FCS_NEAR_OCL_SORT_RADIX_SCALE
 
-  const size_t global_size_reorder = n;
-  const size_t local_size_reorder  = local_size;
+  const size_t global_size_reorder = n / FCS_NEAR_OCL_SORT_RADIX_QUOTA;
+  const size_t local_size_reorder  = local_size / FCS_NEAR_OCL_SORT_RADIX_QUOTA;
+
+#if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+  const int transpose_rows = local_size_histogram;
+  const int transpose_cols = FCS_NEAR_OCL_SORT_RADIX_QUOTA;
+  const int transpose_tilesize = 32;
+
+  size_t global_size_transpose[2];
+  size_t local_size_transpose[2];
+  global_size_transpose[0] = transpose_rows / transpose_tilesize;
+  global_size_transpose[1] = transpose_cols;
+  local_size_transpose[0] = 1;
+  local_size_transpose[1] = transpose_tilesize;
+#endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
 
   INFO_CMD(
     printf(INFO_PRINT_PREFIX "ocl-radix: Sort %ld => %ld elements with radixsort\n", nlocal, n);
     printf(INFO_PRINT_PREFIX "ocl-radix: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
-    printf(INFO_PRINT_PREFIX "ocl-radix: %ld groups, %ld elements each\n", n / local_size, local_size);
+    printf(INFO_PRINT_PREFIX "ocl-radix: %ld groups, %ld workitems each, quota %d\n", n / local_size, local_size, FCS_NEAR_OCL_SORT_RADIX_QUOTA);
 #if FCS_NEAR_OCL_SORT_RADIX_SCALE
     printf(INFO_PRINT_PREFIX "ocl-radix: %d scan levels: ", scan_levels);
     for(int i = 0; i < scan_levels; i++)
@@ -765,6 +782,37 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   // and start the main loop of radix sort
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-radix: start radix sort\n"););
   T_START(22, "sort");
+
+#if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+  // set transpose arguments
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 0, sizeof(cl_mem), &mem_keys));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 1, sizeof(cl_mem), &mem_keys_swap));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 2, sizeof(cl_mem), &mem_index));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 3, sizeof(cl_mem), &mem_index_swap));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 4, sizeof(sort_key_t) * transpose_tilesize * transpose_tilesize, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 5, sizeof(sort_key_t) * transpose_tilesize * transpose_tilesize, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 6, sizeof(int), &transpose_cols));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 7, sizeof(int), &transpose_rows));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 8, sizeof(int), &transpose_tilesize));
+
+  // and run transpose kernel
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-radix: transpose\n"););
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_transpose, 2, NULL, global_size_transpose, local_size_transpose, 0, NULL, &ocl->sort_kernel_completion));
+  CL_CHECK(T_CL_FINISH(ocl->command_queue));
+  T_KERNEL(46, ocl->sort_kernel_completion, "radix_transpose");
+  
+  // and swap buffers
+  {
+    cl_mem mem_tmp = mem_keys;
+    mem_keys = mem_keys_swap;
+    mem_keys_swap = mem_tmp;
+    mem_tmp = mem_index;
+    mem_index = mem_index_swap;
+    mem_index_swap = mem_tmp;
+  }
+#endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+
+  // start passes for radix
   for(int pass = 0; pass < pass_max; pass++) {
     // 1. histogram
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_histogram, 0, sizeof(cl_mem), &mem_keys));
@@ -840,6 +888,33 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     mem_index = mem_index_swap;
     mem_index_swap = mem_tmp;
   }
+  // transpose matrices back when transpose is used
+#if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+  // set transpose arguments
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 0, sizeof(cl_mem), &mem_keys));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 1, sizeof(cl_mem), &mem_keys_swap));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 2, sizeof(cl_mem), &mem_index));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 3, sizeof(cl_mem), &mem_index_swap));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 6, sizeof(int), &transpose_rows));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 7, sizeof(int), &transpose_cols));
+
+  // and run transpose kernel
+  INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-radix: transpose back\n"););
+  CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_radix_transpose, 2, NULL, global_size_transpose, local_size_transpose, 0, NULL, &ocl->sort_kernel_completion));
+  CL_CHECK(T_CL_FINISH(ocl->command_queue));
+  T_KERNEL(46, ocl->sort_kernel_completion, "radix_transpose");
+  
+  // and swap buffers
+  {
+    cl_mem mem_tmp = mem_keys;
+    mem_keys = mem_keys_swap;
+    mem_keys_swap = mem_tmp;
+    mem_tmp = mem_index;
+    mem_index = mem_index_swap;
+    mem_index_swap = mem_tmp;
+  }
+#endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+
   // let the whole radix sort finish up
   CL_CHECK(clFinish(ocl->command_queue));
   T_STOP(22);
