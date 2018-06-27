@@ -90,7 +90,7 @@ static const char *fcs_ocl_cl_sort_config =
   "#define BITONIC_GLOBAL_32 " STR(FCS_NEAR_OCL_SORT_BITONIC_GLOBAL_32) "\n"
 
   "#define BUCKET_INDEXER_LOCAL " STR(FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL) "\n"
-  "#define BUCKET_SKIP_FIRST" STR(FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET) "\n"
+  "#define BUCKET_SKIP_FIRST " STR(FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET) "\n"
   ;
   // built in Makefile.am/.in  like near.cl_str.h
 static const char* fcs_ocl_cl_sort =
@@ -1791,6 +1791,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   if(nlocal % workgroupSortSize != 0)
     // fill to the remainder
     n = nlocal + (workgroupSortSize - (nlocal % workgroupSortSize));
+  else
+    n = nlocal;
 #endif // FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET
 
   // offset from n
@@ -2144,10 +2146,12 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   // check if the bucket is really empty and if so, change offsets
   if(skipFirstBucket) {
     for(int i = 1; i < globalSampleNum; i++)
-      bucketContainerOffsets[i] = bucketContainers[0];
+      bucketContainerOffsets[i] -= bucketContainers[0];
 
     // and write that back
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_bucketContainerOffsets, CL_TRUE, 0, globalSampleNum * sizeof(int), bucketContainerOffsets, 0, NULL, NULL));
+
+    bucketsTotalElementSize -= bucketContainers[0];
   }
 
 #else

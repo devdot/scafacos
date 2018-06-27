@@ -292,9 +292,9 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 
 #if BUCKET_SKIP_FIRST
 		// only skip the first bucket when it's really set as empty
-		if(bucket == 0 && bucketContainerOffsets[1] == 0)
-			continue;
+		if(!(bucket == 0 && bucketContainerOffsets[1] == 0)) {
 #endif // BUCKET_SKIP_FIRST
+
 
 		// calculate the offset of this element in the bucket arrays
 		bucketOffset = bucketContainerInnerOffsets[bucket] + bucketContainerOffsets[bucket]; // TODO calc in local
@@ -305,6 +305,9 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 		// now we got both offsets, just copy
 		keysOut[bucketOffset] = keysIn[local_id];
 		indexOut[bucketOffset] = indexIn[local_id];
+#if BUCKET_SKIP_FIRST
+		}
+#endif // BUCKET_SKIP_FIRST
 
 		// increase local_id
 		local_id += local_size;
