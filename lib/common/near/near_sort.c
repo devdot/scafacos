@@ -1486,6 +1486,15 @@ static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int 
   *quota = ocl->local_memory / (*local_size_local * *bytesPerElement);
   *quota = fcs_ocl_helper_prev_power_of_2(*quota);
 
+  // check for minimum quota and increase if needed
+  if(*quota < FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA)
+    *quota = FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA;
+
+  // and check for max quota as well
+  if(*quota > FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA)
+    *quota = FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA;
+
+  // scale down first workgroup size and then quota if need be
   while (n / (4 * *quota) < *local_size_local && *local_size_local > FCS_NEAR_OCL_SORT_WORKGROUP_MIN) {
     // we need to adjust and make smaller groups
     *local_size_local /= 2;
