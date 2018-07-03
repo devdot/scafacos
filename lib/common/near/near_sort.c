@@ -595,6 +595,17 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
         local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
   }
 
+  // downscale to fit local memory
+  while((local_size / FCS_NEAR_OCL_SORT_RADIX_QUOTA) * FCS_NEAR_OCL_SORT_RADIX * sizeof(int) > ocl->local_memory) {
+    printf("%d\n", local_size);
+    local_size /= 2;
+  }
+
+  if(local_size == 0) {
+    // abort the mission right here
+    printf("Can't fit into local memory!\n");
+  }
+
   size_t n = (nlocal % local_size == 0)? nlocal : nlocal + local_size - (nlocal % local_size);
   size_t offset = n - nlocal;
 
@@ -691,6 +702,10 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   while(transpose_tilesize > transpose_cols || transpose_tilesize > transpose_rows)
     transpose_tilesize /= 2;
 
+  // check for remainder of division and make tilesize even smaller
+  while(transpose_rows % transpose_tilesize || transpose_cols % transpose_tilesize)
+    transpose_tilesize /= 2;
+
   size_t global_size_transpose[2];
   size_t local_size_transpose[2];
   global_size_transpose[0] = transpose_rows / transpose_tilesize;
@@ -713,7 +728,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     printf(INFO_PRINT_PREFIX "ocl-radix: Scan2: %ld => %ld elements\n", scan2_groups_real, scan2_groups);
 #endif // FCS_NEAR_OCL_SORT_RADIX_SCALE
 #if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
-    printf(INFO_PRINT_PREFIX "ocl-radix: Transpose %ld x %ld matrix with %ld x %ld groups\n", global_size_transpose[0], global_size_transpose[1], local_size_transpose[0], local_size_transpose[1]);
+    printf(INFO_PRINT_PREFIX "ocl-radix: Transpose %ld x %ld groups matrix with %ld x %ld groups\n", global_size_transpose[0], global_size_transpose[1], local_size_transpose[0], local_size_transpose[1]);
 #endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
   );
 
@@ -780,7 +795,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
 #endif
 
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 4, sizeof(cl_mem), &mem_histograms));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * local_size, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int) * FCS_NEAR_OCL_SORT_RADIX * local_size_reorder, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(int), &n));
 
   // calculate the amount of passes from the datatype of keys
