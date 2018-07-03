@@ -1489,9 +1489,9 @@ static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int 
   // check for minimum quota and increase if needed
   if(*quota < FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA)
     *quota = FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA;
-
+  
   // and check for max quota as well
-  if(*quota > FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA)
+  if(FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA != -1 && *quota > FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA)
     *quota = FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA;
 
   // scale down first workgroup size and then quota if need be
@@ -1553,7 +1553,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   if(!onlySort) {
     INFO_CMD(
       printf(INFO_PRINT_PREFIX "ocl-hybrid: bitonic hybrid (use index: %d, index global: %d) [%ld] => [%ld]\n", FCS_NEAR_OCL_SORT_USE_INDEX, FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL, nlocal, n);
-      printf(INFO_PRINT_PREFIX "ocl-hybrid: %ld groups, %d elements each (quota %d)\n", global_size_local / local_size_local, workgroupElementsNum, quota);
+      printf(INFO_PRINT_PREFIX "ocl-hybrid: %ld groups, %ld group size, %d elements each (quota %d)\n", global_size_local / local_size_local, local_size_local, workgroupElementsNum, quota);
       printf(INFO_PRINT_PREFIX "ocl-hybrid: local memory: %ld of %ld bytes\n", bytesPerElement * workgroupElementsNum, ocl->local_memory);
     );
 
