@@ -980,6 +980,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   CL_CHECK(clReleaseMemObject(mem_histograms_sum_tmp));
 #endif // FCS_NEAR_OCL_SORT_RADIX_SCALE
 
+  // recreate the sub index because the buffer may have been swapped
+  mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &index_region, &_err));
   fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 
   // destroy remaining buffers
