@@ -176,7 +176,11 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	__global unsigned int* bucketContainers,
 	__global unsigned int* bucketInnerOffsets,
 	__global unsigned int* bucketContainerPrefix,
-	const int rows)
+	const int rows
+#if BUCKET_USE_RADIX
+	, const int radixLocalSize
+#endif // BUCKET_USE_RADIX	
+)
 {
 	int i = get_local_id(0);
 	int cols = get_local_size(0);
@@ -189,11 +193,19 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// we got the sizes of each bucket in row
-
+#if BUCKET_USE_RADIX
+	// look for next multiple of current size for radix
+	bufferContainerPrefix[i] = row[i];
+	int rem = row[i] % radixLocalSize;
+	// only add when needed
+	if(rem != 0)
+		bufferContainerPrefix[i] += radixLocalSize - rem;
+#else // BUCKET_USE_RADIX
 	// find the next bigger power of 2 for container size
 	bufferContainerPrefix[i] = 1;
 	while(bufferContainerPrefix[i] < row[i])
 		bufferContainerPrefix[i] <<= 1;
+#endif //BUCKET_USE_RADIX
 
 	// fix 0 size buckets (should not happen too much though because that kills performance)
 	if(row[i] == 0)

@@ -69,6 +69,7 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_HYBRID_PAIRWISE     0
 
 // configuration for bucket sort
+#define FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX        0
 #define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1
 #define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    0 // slower according to benchmarks
 #define FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES    32
