@@ -108,7 +108,7 @@ typedef struct
 
   cl_program sort_program_radix;
   cl_kernel sort_kernel_radix_histogram;
-  cl_kernel sort_kernel_radix_histogram_paste;
+  cl_kernel sort_kernel_radix_scan_paste;
   cl_kernel sort_kernel_radix_scan;
   cl_kernel sort_kernel_radix_scan_global;
   cl_kernel sort_kernel_radix_reorder;

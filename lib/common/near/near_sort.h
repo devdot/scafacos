@@ -41,6 +41,8 @@ extern "C" {
 
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0
 #define FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG  1
+#define FCS_NEAR_OCL_SORT_HISTOGRAM_IS_INT        1
+#define FCS_NEAR_OCL_SORT_HISTOGRAM_IS_LONG_LONG  0
 
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
@@ -121,6 +123,14 @@ void fcs_ocl_sort(fcs_near_t* near);
   typedef long long sort_index_t;
 #else
 # error Type for box_t not available
+#endif
+
+#if FCS_NEAR_OCL_SORT_HISTOGRAM_IS_INT
+  typedef unsigned int histogram_t;
+#elif FCS_NEAR_OCL_SORT_HISTOGRAM_IS_LONG_LONG
+  typedef unsigned long long histogram_t;
+#else
+# error Type for histogram_t not available
 #endif
 
 

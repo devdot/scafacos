@@ -9,7 +9,6 @@ typedef void HERE_COMES_THE_CODE;
 #else
     typedef int shortkey_t;
 #endif
-typedef int histogram_t;
 
 // one workitem per quota keys
 __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* histograms, __local histogram_t* local_histograms, const int pass, const int n) {
@@ -120,7 +119,7 @@ __kernel void radix_scan(__global histogram_t* histograms, __local histogram_t* 
 }
 
 
-__kernel void radix_histogram_paste(__global histogram_t* histograms, __global histogram_t* sum) {
+__kernel void radix_scan_paste(__global histogram_t* histograms, __global histogram_t* sum) {
     histogram_t s = sum[get_group_id(0)];
 
     // offset the global array
@@ -168,8 +167,8 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         // calculate the index for the out array
 #if RADIX_TRANSPOSE
         int indexOutTmp = local_histograms[shortkey * local_workitems + local_id];
-        int t1 = indexOutTmp / (n / workgroups / local_workitems);
-        int t2 = indexOutTmp % (n / workgroups / local_workitems);
+        int t1 = indexOutTmp / quota; // row
+        int t2 = indexOutTmp % quota; // col
         indexOut = t2 * (workgroups * local_workitems) + t1;
 #else
         indexOut = local_histograms[shortkey * local_workitems + local_id];
