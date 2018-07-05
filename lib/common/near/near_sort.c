@@ -670,8 +670,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   local_sizes_scan[0]  = min(FCS_NEAR_OCL_SORT_WORKGROUP_MAX, global_sizes_scan[0]);
 
   // make first local size fit the global size
-  while(global_sizes_scan[0] % local_sizes_scan[0] != 0) {
-    local_sizes_scan[0] /= 2;
+  if(global_sizes_scan[0] % local_sizes_scan[0] != 0) {
+    global_sizes_scan[0] += local_sizes_scan[0] - (global_sizes_scan[0] % local_sizes_scan[0]);
   }
 
   // for local buffers
@@ -707,6 +707,11 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   scan_size = fcs_ocl_helper_next_power_of_2(histogram_size) / (2 * FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
   if(scan_size < FCS_NEAR_OCL_SORT_WORKGROUP_MIN)
     scan_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
+
+  // adjust histogram size
+  if(histogram_size % scan_size) {
+    histogram_size += scan_size - (histogram_size % scan_size);
+  }
 
   const size_t global_size_scan   = histogram_size / 2;
   const size_t local_size_scan    = scan_size / 2;
@@ -751,6 +756,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
       printf(INFO_PRINT_PREFIX "ocl-radix: Sort %ld => %ld elements with radixsort\n", nlocal, n);
       printf(INFO_PRINT_PREFIX "ocl-radix: Radix: %d (%dbits)\n", FCS_NEAR_OCL_SORT_RADIX, FCS_NEAR_OCL_SORT_RADIX_BITS);
       printf(INFO_PRINT_PREFIX "ocl-radix: %ld groups, %ld workitems each, quota %d\n", n / local_size, local_size_histogram, FCS_NEAR_OCL_SORT_RADIX_QUOTA);
+      printf(INFO_PRINT_PREFIX "ocl-radix: histogram size: %ld entries\n", histogram_size);
 #if FCS_NEAR_OCL_SORT_RADIX_SCALE
       printf(INFO_PRINT_PREFIX "ocl-radix: %d scan levels: ", scan_levels);
       for(int i = 0; i < scan_levels; i++)
