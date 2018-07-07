@@ -157,6 +157,12 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 #if RADIX_TRANSPOSE
     int index = global_id;
     const int indexIncrement = workgroups * local_workitems;
+
+    // also quota exponent e (q = 2^e)
+    // get the exponent by finding the first bit that's a 1
+    int quotaExponent = 0;
+    for(int q = quota; (q & 1) == 0; q >>= 1)
+        quotaExponent++;
 #else
     int index = offset;
     const int indexIncrement = 1;
@@ -174,9 +180,9 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         // calculate the index for the out array
 #if RADIX_TRANSPOSE
         int indexOutTmp = local_histograms[shortkey * local_workitems + local_id];
-        int t1 = indexOutTmp / quota; // row
-        int t2 = indexOutTmp % quota; // col
-        indexOut = t2 * (workgroups * local_workitems) + t1;
+        int t1 = indexOutTmp >> quotaExponent; // row (is equal to (indexOutTmp / quota)
+        int t2 = indexOutTmp & (quota - 1); // col (is equal to (indexOutTmp % quota))
+        indexOut = t2 * (indexIncrement) + t1;
 #else
         indexOut = local_histograms[shortkey * local_workitems + local_id];
 #endif // RADIX_TRANSPOSE
