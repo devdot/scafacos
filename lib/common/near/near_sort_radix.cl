@@ -31,17 +31,19 @@ __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* 
     // sync up with all the workitems in our group
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // compute index 
-    int index;
+    // variables for loop
     key_t key, shortkey;
 
-    for(int i = 0; i < quota; i++) {
+    // index is calculated based on transposition
 #if RADIX_TRANSPOSE
-        index = workgroups * local_workitems * i + global_id;
-#else 
-        index = offset + i;
+    int index = global_id;
+    const int indexIncrement = workgroups * local_workitems;
+#else
+    int index = offset;
+    const int indexIncrement = 1;
 #endif // RADIX_TRANSPOSE
 
+    for(int i = 0; i < quota; i++) {
         key = keys[index];
 
         // extract the current radix (that is used for sorting in this pass)
@@ -50,6 +52,9 @@ __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* 
 
         // increment the histogram that is associated with this shortkey
         local_histograms[shortkey * local_workitems + local_id]++;
+        
+        // increment index
+        index += indexIncrement;
     }
 
     // sync up again
@@ -148,17 +153,19 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // pre calculate the incrementing variables
+#if RADIX_TRANSPOSE
+    int index = global_id;
+    const int indexIncrement = workgroups * local_workitems;
+#else
+    int index = offset;
+    const int indexIncrement = 1;
+#endif // RADIX_TRANSPOSE
+
     // move items 
-    int index;
     int indexOut;
     key_t key, shortkey;
     for(int i = 0; i < quota; i++) {
-#if RADIX_TRANSPOSE
-        index = workgroups * local_workitems * i + global_id;
-#else
-        index = i + offset;
-#endif // RADIX_TRANSPOSE
-
         key = keysIn[index];
         
         // get the shortkey again
@@ -180,6 +187,9 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 
         // and increment in the histogram
         local_histograms[shortkey * local_workitems + local_id]++;
+
+        // increment the index
+        index += indexIncrement;
     }
 }
 
