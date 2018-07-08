@@ -222,6 +222,7 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	// prepare prefix sum of container
 	// move all elements one to the left and insert 0 at start
 	j = i - 1;
+	barrier(CLK_LOCAL_MEM_FENCE);
 	tempContainer = j < 0 ? 0 : bufferContainerPrefix[j];
 	barrier(CLK_LOCAL_MEM_FENCE);
 	bufferContainerPrefix[i] = tempContainer;
