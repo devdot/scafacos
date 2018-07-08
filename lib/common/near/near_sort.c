@@ -2043,8 +2043,10 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     // create a sub buffer and offset it by the global offset (-1) so the first element is the last 0
     cl_buffer_region region = {(offset - 1) * sizeof(sort_key_t), 0};
     // check for offset == 0 that leads to errors
-    if(region.origin < 0)
+    // can't check for negative region.origin because size_t is unsigned
+    if(offset == 0)
       region.origin = 0;
+
     region.size = (n * sizeof(sort_key_t)) - region.origin;
 
     // set the buffer according to the region
@@ -2076,19 +2078,21 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(T_CL_FINISH(ocl->command_queue));
     T_KERNEL(32, ocl->sort_kernel_completion, "bucket_sample_local");
 
-    // calculate the amount of zero-samples
-    int offsetSamples = offset / localSampleDist;
-    if(offset % localSampleDist != 0)
-      offsetSamples++;
+    // we won't have zero-samples if there aren't any offset elements
+    if(offset != 0) {
+      // calculate the amount of zero-samples
+      int offsetSamples = offset / localSampleDist;
+      if(offset % localSampleDist != 0)
+        offsetSamples++;
 
-    // redo local sample dist and global size to catch offsetSamples more samples from the local groups on skewed buffer (fill those zero spots because we only need 1 zero)
-    global_size = offsetSamples;
-    localSampleDist = (region.size / sizeof(sort_key_t)) / global_size;
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_sample, 0, sizeof(cl_mem), &mem_keys_sub));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_sample, 1, sizeof(localSampleDist), &localSampleDist));
-    // run again
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_sample, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
-
+      // redo local sample dist and global size to catch offsetSamples more samples from the local groups on skewed buffer (fill those zero spots because we only need 1 zero)
+      global_size = offsetSamples;
+      localSampleDist = (region.size / sizeof(sort_key_t)) / global_size;
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_sample, 0, sizeof(cl_mem), &mem_keys_sub));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_sample, 1, sizeof(localSampleDist), &localSampleDist));
+      // run again
+      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_bucket_sample, 1, NULL, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+    }
     // very important: check if the smallest non-offset element of first group is in sample pool
     //   this sample is a candidate for over all smallest sample
     if(offset % localSampleDist != 0) {
