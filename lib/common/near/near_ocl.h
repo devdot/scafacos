@@ -27,6 +27,8 @@ extern "C" {
 
 #if HAVE_OPENCL
 
+#define FCS_NEAR_OCL_CPU_CUS 0 // set to 0 to use all
+
 #include "near.h"
 
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS

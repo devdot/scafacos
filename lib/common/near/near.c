@@ -804,7 +804,32 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   cl_device_id device_id;
   fcs_ocl_get_device(&units[0], comm_rank, &device_id);
 
+#if FCS_NEAR_OCL_CPU_CUS
+  // calculate how to partition the device
+  // get total compute units
+  cl_uint cus;
+  CL_CHECK(clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cus), &cus, NULL));
+
+  // check for boundries
+  if(FCS_NEAR_OCL_CPU_CUS > cus) {
+    // fail
+    printf("error: trying to use %d CUs, only %d available\n", FCS_NEAR_OCL_CPU_CUS, cus);
+    abort();
+  }
+
+  // make list with desired CU count for property parameter
+  const cl_device_partition_property properties[] = {CL_DEVICE_PARTITION_BY_COUNTS, FCS_NEAR_OCL_CPU_CUS, CL_DEVICE_PARTITION_BY_COUNTS_LIST_END};
+
+  cl_device_id sub_device_id;
+  CL_CHECK(clCreateSubDevices(device_id, properties, 1, &sub_device_id, NULL));
+
+  device_id = sub_device_id;
+
+  INFO_CMD(printf(INFO_PRINT_PREFIX "only use %d of %d CUs\n", FCS_NEAR_OCL_CPU_CUS, cus););
+#endif // FCS_NEAR_OCL_CPU_CUS
+
 #if FCS_NEAR_OCL_SORT
+  // save device id for later usage
   ocl->device_id = device_id;
 
   // query local memory size
