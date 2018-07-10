@@ -79,6 +79,7 @@ static const char *fcs_ocl_cl_sort_config =
 #endif
 
   "#define USE_INDEX " STR(FCS_NEAR_OCL_SORT_USE_INDEX) "\n"
+  "#define USE_SUBBUFFERS " STR(FCS_NEAR_OCL_SORT_USE_SUBBUFFERS) "\n"
 
   "#define RADIX " STR(FCS_NEAR_OCL_SORT_RADIX) "\n"
   "#define RADIX_BITS " STR(FCS_NEAR_OCL_SORT_RADIX_BITS) "\n"
@@ -223,7 +224,8 @@ void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t o
 
   // read back the index
   T_START(53, "move_data_read");
-  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_index, CL_TRUE, 0, nlocal * sizeof(sort_index_t), index, 0, NULL, NULL));
+  // offset will be set to 0 when using subbuffers
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_index, CL_TRUE, offset * sizeof(sort_index_t), nlocal * sizeof(sort_index_t), index, 0, NULL, NULL));
   T_STOP(53);
 
   // now just move
@@ -335,6 +337,11 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
 
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+  // set offset to 0
+  offset = 0;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+
 #if FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
   // calculate where the data can be moved based on global size
   size_t buffer_size;
@@ -510,8 +517,8 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
     CL_CHECK(clReleaseMemObject(mem_potentialsIn));
 
 #if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
-    // check if we should not keep on device
-    if(ocl->buffers_on_device == -1)
+  // check if we should not keep on device
+  if(ocl->buffers_on_device == -1)
 #endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
   {
     CL_CHECK(clReleaseMemObject(mem_positionsOut));
@@ -820,14 +827,20 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
 
     {
       // initialize the index
-      size_t global_size = n - offset;
+      size_t global_size = nlocal;
+      size_t global_offset = 0;
 
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
       index_region.origin = offset * sizeof(sort_index_t);
       index_region.size   = global_size * sizeof(sort_index_t);
+#else
+      index_region.origin = 0;
+      index_region.size = n * sizeof(sort_index_t);
+      global_offset = offset;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
       mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &index_region, &_err));
-
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
-      CL_CHECK(clEnqueueNDRangeKernel(queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clEnqueueNDRangeKernel(queue, ocl->sort_kernel_init_index, 1, &global_offset, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
     }
 
     // let it finish for timing
@@ -1061,6 +1074,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   CL_CHECK(clReleaseMemObject(mem_index_swap));
 
   // recreate the sub index because the buffer may have been swapped
+  CL_CHECK(clReleaseMemObject(mem_index_sub));
   mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &index_region, &_err));
   fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 
@@ -1210,13 +1224,22 @@ static void fcs_ocl_sort_bitonic(fcs_ocl_context_t *ocl, size_t nlocal, sort_key
 
 #if FCS_NEAR_OCL_SORT_USE_INDEX
     // initialize the index
-    size_t global_size = n - offset;
+    size_t global_size = nlocal;
+    size_t global_offset = 0;
 
-    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
+    cl_buffer_region region;
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+    region.origin = offset * sizeof(sort_index_t);
+    region.size   = global_size * sizeof(sort_index_t);
+#else
+    region.origin = 0;
+    region.size = n * sizeof(sort_index_t);
+    global_offset = offset;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, &global_offset, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
 #else // FCS_NEAR_OCL_SORT_USE_INDEX
     // data offsets don't need to be filled with zeros
     CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_positions,  CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
@@ -1647,13 +1670,22 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       mem_index = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
 
       // go on to initialize the index
-      size_t global_size = n - offset;
+      size_t global_size = nlocal;
+      size_t global_offset = 0;
 
-      cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
+      cl_buffer_region region;
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+      region.origin = offset * sizeof(sort_index_t);
+      region.size   = global_size * sizeof(sort_index_t);
+#else
+      region.origin = 0;
+      region.size = n * sizeof(sort_index_t);
+      global_offset = offset;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
       mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
-      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+      CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, &global_offset, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
 #else // FCS_NEAR_OCL_SORT_USE_INDEX
       // we offset this too, can't use CL_MEM_USE_HOST_PTR nor size nlocal nor host_ptr
       mem_positions  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
@@ -1936,13 +1968,22 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
   // initialize the index
   {
-    size_t global_size = n - offset;
+    size_t global_size = nlocal;
+    size_t global_offset = 0;
 
-    cl_buffer_region region = {offset * sizeof(sort_index_t), global_size * sizeof(sort_index_t)};
+    cl_buffer_region region;
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+    region.origin = offset * sizeof(sort_index_t);
+    region.size   = global_size * sizeof(sort_index_t);
+#else
+    region.origin = 0;
+    region.size = n * sizeof(sort_index_t);
+    global_offset = offset;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
     mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
 
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
-    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, 0, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
+    CL_CHECK(clEnqueueNDRangeKernel(ocl->command_queue, ocl->sort_kernel_init_index, 1, &global_offset, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
   }
   // let it all finish
   CL_CHECK(clFinish(ocl->command_queue));

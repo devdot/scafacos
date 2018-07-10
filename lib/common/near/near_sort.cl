@@ -62,30 +62,44 @@ static void inline swap_data_all_global(int i, int j,
 
 __kernel void init_index(__global index_t* index) {
     index_t i = get_global_id(0);
+  
+#if !USE_SUBBUFFERS
+    // need to subtract offset from value but keep the position so we shift the array
+    size_t offset = get_global_offset(0);
+    index += offset;
+    i -= offset;
+#endif // !USE_SUBBUFFERS
+
     index[i] = i;
 }
 
 // one work-item per memory item
-__kernel void move_data_float(__global const index_t* data, const int offset,
+__kernel void move_data_float(__global index_t* index, const int offset,
     __global const fcs_float* in,
     __global fcs_float* out)
 {
+    // shift index array
+    index += offset;
+
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut];
+    index_t indexIn = index[indexOut];
 
     // and now just write in to out
     out[indexOut] = in[indexIn];
 }
 
 // one work-item per memory item
-__kernel void move_data_float_triple(__global const index_t* data, const int offset,
-    __global const fcs_float* in,
+__kernel void move_data_float_triple(__global index_t* index, const int offset,
+    __global fcs_float* in,
     __global fcs_float* out)
 {
+    // shift index array
+    index += offset;
+
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut];
+    index_t indexIn = index[indexOut];
 
     // adjust for triple
     indexIn *= 3;
@@ -98,16 +112,19 @@ __kernel void move_data_float_triple(__global const index_t* data, const int off
 }
 
 // one work-item per memory item
-__kernel void move_data_gridsort_index(__global const index_t* data, const int offset,
-    __global const fcs_gridsort_index_t* in,
+__kernel void move_data_gridsort_index(__global index_t* index, const int offset,
+    __global fcs_gridsort_index_t* in,
     __global fcs_gridsort_index_t* out)
 {
+    // shift index array
+    index += offset;
+
     // get our index
     index_t indexOut  = get_global_id(0);
-    index_t indexIn = data[indexOut];
+    index_t indexIn = index[indexOut];
 
     // and now just write in to out
     out[indexOut] = in[indexIn];
 }
 
-#endif // BITONIC_USE_INDEX
+#endif // USE_INDEX
