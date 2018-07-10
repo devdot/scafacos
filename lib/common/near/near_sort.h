@@ -49,8 +49,8 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
 
 // configuration for radix sort
-#define FCS_NEAR_OCL_SORT_RADIX_BITS      2
-#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     4
+#define FCS_NEAR_OCL_SORT_RADIX_BITS      3
+#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     16
 #define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1 // only when quota > 1 !!
 #define FCS_NEAR_OCL_SORT_RADIX_SCALE     1
 // radix is automatic
@@ -72,7 +72,7 @@ extern "C" {
 // configuration for bucket sort
 #define FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX        0
 #define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1
-#define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    0 // slower according to benchmarks
+#define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    1
 #define FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES    32
 #define FCS_NEAR_OCL_SORT_BUCKET_GLOBAL_SAMPLES   64
 #define FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET       1
