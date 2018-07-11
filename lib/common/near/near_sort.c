@@ -571,7 +571,6 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
     fcs_ocl_cl,
     fcs_ocl_math_cl,
     fcs_ocl_cl_sort_config,
-    "#define USE_INDEX 1\n",
     fcs_ocl_cl_sort,
     fcs_ocl_cl_sort_radix
   };

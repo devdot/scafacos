@@ -210,7 +210,7 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
         dataOut[indexOut] = dataIn[index];
 #else // USE_INDEX
         int tripleIn = index * 3;
-        int tripleOut = index * 3;
+        int tripleOut = indexOut * 3;
 
         positionsOut[tripleOut]     = positionsIn[tripleIn];
         positionsOut[tripleOut+1]   = positionsIn[tripleIn+1];
