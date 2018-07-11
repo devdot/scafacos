@@ -1135,8 +1135,20 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     return;
   }
 
+  // read back data
+  T_START(23, "read_back");
+#if !FCS_NEAR_OCL_SORT_USE_INDEX
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_positions, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_charges, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+  CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_indices, CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+  if(field != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_field, CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+  if(potentials != NULL)
+    CL_CHECK(clEnqueueReadBuffer(ocl->command_queue, mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+    
+#endif // !FCS_NEAR_OCL_SORT_USE_INDEX
+
   // read back keys
-  T_START(23, "read_keys");
   CL_CHECK(clEnqueueReadBuffer(queue, mem_keys, CL_TRUE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
   T_STOP(23);
 
@@ -1152,6 +1164,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   CL_CHECK(clReleaseMemObject(mem_index_swap));
   CL_CHECK(clReleaseMemObject(mem_index_sub));
   mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &index_region, &_err));
+  // move the data according to index
   fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
 #endif // FCS_NEAR_OCL_SORT_USE_INDEX
 
