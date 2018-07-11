@@ -216,6 +216,11 @@ size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
 
 void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+  // set offset to 0
+  offset = 0;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data on host, splitted\n"););
   T_START(24, "move_data");
 
@@ -257,6 +262,11 @@ void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t o
 
 void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
+#if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+  // set offset to 0
+  offset = 0;
+#endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: move data split\n"););
   T_START(24, "move_data");
 
