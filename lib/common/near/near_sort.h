@@ -84,6 +84,10 @@ extern "C" {
 #error Cannot enable both optimizations at once
 #endif
 
+#if !FCS_NEAR_OCL_SORT_USE_INDEX && FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+#warning Radix Sort cannot run with transpose and swap along
+#endif
+
 // enum for algo types
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC        1
 #define FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX  2

@@ -137,7 +137,23 @@ __kernel void radix_scan_paste(__global histogram_t* histograms, __global histog
 
 
 // handles quota amount of  keys
-__kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOut, const __global index_t* dataIn, __global index_t* dataOut, __global histogram_t* histograms, __local histogram_t* local_histograms, const int pass, const int n) {
+__kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOut, __global histogram_t* histograms, __local histogram_t* local_histograms, const int pass, const int n,
+#if USE_INDEX
+    const __global index_t* dataIn,
+    __global index_t* dataOut
+#else // USE_INDEX
+    __global fcs_float* positionsIn,
+    __global fcs_float* positionsOut,
+    __global fcs_float* chargesIn,
+    __global fcs_float* chargesOut, 
+    __global fcs_gridsort_index_t* indicesIn,
+    __global fcs_gridsort_index_t* indicesOut,  
+    __global fcs_float* fieldIn,
+    __global fcs_float* fieldOut,  
+    __global fcs_float* potentialsIn,
+    __global fcs_float* potentialsOut
+#endif // USE_INDEX
+) {
     int local_id = get_local_id(0);
     int global_id = get_global_id(0);
     int group_id = get_group_id(0);
@@ -189,7 +205,26 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
 
         // write
         keysOut[indexOut] = key;
+        // depending on swap along or index
+#if USE_INDEX
         dataOut[indexOut] = dataIn[index];
+#else // USE_INDEX
+        int tripleIn = index * 3;
+        int tripleOut = index * 3;
+
+        positionsOut[tripleOut]     = positionsIn[tripleIn];
+        positionsOut[tripleOut+1]   = positionsIn[tripleIn+1];
+        positionsOut[tripleOut+2]   = positionsIn[tripleIn+2];
+        chargesOut[indexOut]        = chargesIn[index];
+        indicesOut[indexOut]        = indicesIn[index];
+        if(fieldIn != NULL) {
+            fieldOut[tripleOut]     = fieldIn[tripleIn];
+            fieldOut[tripleOut+1]   = fieldIn[tripleIn+1];
+            fieldOut[tripleOut+2]   = fieldIn[tripleIn+2];
+        }
+        if(potentialsIn != NULL)
+            potentialsOut[indexOut] = potentialsIn[index];
+#endif // USE_INDEX
 
         // and increment in the histogram
         local_histograms[shortkey * local_workitems + local_id]++;

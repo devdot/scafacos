@@ -587,8 +587,10 @@ static void fcs_ocl_sort_radix_prepare(fcs_ocl_context_t *ocl) {
   ocl->sort_kernel_radix_transpose          = CL_CHECK_ERR(clCreateKernel(ocl->sort_program_radix, "radix_transpose", &_err));
 #endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
 
+#if FCS_NEAR_OCL_SORT_USE_INDEX
   // leave program for index program
   ocl->sort_program_index = ocl->sort_program_radix;
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
 }
 
 static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
@@ -626,6 +628,26 @@ static inline void fcs_ocl_sort_radix_params(fcs_ocl_context_t* ocl, const size_
   }
 }
 
+#define RADIX_SWAP_SINGLE(a, b, tmp) {tmp = a; a = b; b = tmp;}
+// different swap macro depeding on usage of index
+#if FCS_NEAR_OCL_SORT_USE_INDEX
+#define RADIX_SWAP() {\
+  cl_mem mem_tmp;\
+  RADIX_SWAP_SINGLE(mem_keys, mem_keys_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_index, mem_index_swap, mem_tmp);\
+}
+#else // FCS_NEAR_OCL_SORT_USE_INDEX
+#define RADIX_SWAP() {\
+  cl_mem mem_tmp;\
+  RADIX_SWAP_SINGLE(mem_keys, mem_keys_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_positions, mem_positions_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_charges, mem_charges_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_indices, mem_indices_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_field, mem_field_swap, mem_tmp);\
+  RADIX_SWAP_SINGLE(mem_potentials, mem_potentials_swap, mem_tmp);\
+}
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
+
 static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t *keys, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials,
   const size_t* ext_local_size, cl_mem* ext_mem_keys, cl_mem* ext_mem_keys_swap, cl_mem* ext_mem_index, cl_mem* ext_mem_index_swap, cl_command_queue* ext_queue 
 )
@@ -633,6 +655,12 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   // just to be safe
   if(nlocal == 1)
     return;
+
+#if !FCS_NEAR_OCL_SORT_USE_INDEX && FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
+  // they don't go well together
+  printf("Don't use radix sort with swap along and transpose\n");
+  abort();
+#endif
 
   cl_command_queue queue = (ext_queue == NULL)?ocl->command_queue:*ext_queue;
   int do_wait = (ext_queue == NULL);
@@ -799,15 +827,24 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   cl_mem mem_histograms_sum_tmp = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sizeof(histogram_t) * scan2_groups, NULL, &_err));
 #endif
 
-  cl_mem mem_keys, mem_keys_swap, mem_index, mem_index_swap, mem_index_sub;
+  cl_mem mem_keys, mem_keys_swap;
+#if FCS_NEAR_OCL_SORT_USE_INDEX
+  cl_mem mem_index, mem_index_swap, mem_index_sub;
   cl_buffer_region index_region;
+#else // FCS_NEAR_OCL_SORT_USE_INDEX
+  cl_mem mem_positions, mem_positions_swap, mem_charges, mem_charges_swap, mem_indices, mem_indices_swap, mem_field, mem_field_swap, mem_potentials, mem_potentials_swap;
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
+
   // do this whole initialization only when really needed
   if(only_sort) {
      // just set the external buffers as ours
+     // only allow this when using the index
+#if FCS_NEAR_OCL_SORT_USE_INDEX
     mem_keys        = *ext_mem_keys;
     mem_keys_swap   = *ext_mem_keys_swap;
     mem_index       = *ext_mem_index;
     mem_index_swap  = *ext_mem_index_swap;
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
   } // only_sort
   else {
    // create buffers
@@ -815,15 +852,10 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     mem_keys       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_key_t), NULL, &_err));
     mem_keys_swap  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_key_t), NULL, &_err));
 
+#if FCS_NEAR_OCL_SORT_USE_INDEX
     mem_index      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
     mem_index_sub;
     mem_index_swap = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(sort_index_t), NULL, &_err));
-
-    // write keys to buffer
-    CL_CHECK(clEnqueueWriteBuffer(queue, mem_keys, CL_FALSE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
-    // fill up the front with zeros
-    const int zero = 0;
-    CL_CHECK(clEnqueueFillBuffer(queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
 
     {
       // initialize the index
@@ -833,7 +865,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
 #if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
       index_region.origin = offset * sizeof(sort_index_t);
       index_region.size   = global_size * sizeof(sort_index_t);
-#else
+#else // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
       index_region.origin = 0;
       index_region.size = n * sizeof(sort_index_t);
       global_offset = offset;
@@ -842,6 +874,37 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
       CL_CHECK(clSetKernelArg(ocl->sort_kernel_init_index, 0, sizeof(cl_mem), &mem_index_sub));
       CL_CHECK(clEnqueueNDRangeKernel(queue, ocl->sort_kernel_init_index, 1, &global_offset, &global_size, NULL, 0, NULL, &ocl->sort_kernel_completion));
     }
+#else // FCS_NEAR_OCL_SORT_USE_INDEX
+    // make data buffers
+    mem_positions       = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+    mem_positions_swap  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+    mem_charges         = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+    mem_charges_swap    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+    mem_indices         = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_gridsort_index_t), NULL, &_err));
+    mem_indices_swap    = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_gridsort_index_t), NULL, &_err));
+    if(field != NULL)
+      mem_field           = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+      mem_field_swap      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * 3 * sizeof(fcs_float), NULL, &_err));
+    if(potentials != NULL)
+      mem_potentials      = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+      mem_potentials_swap = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, n * sizeof(fcs_float), NULL, &_err));
+
+    // write data to buffers
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_positions,  CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), positions, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_charges,    CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), charges, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_indices,    CL_FALSE, offset * sizeof(fcs_gridsort_index_t), nlocal * sizeof(fcs_gridsort_index_t), indices, 0, NULL, NULL));
+    if(field != NULL)
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_field,      CL_FALSE, offset * 3 * sizeof(fcs_float), nlocal * 3 * sizeof(fcs_float), field, 0, NULL, NULL));
+    if(potentials != NULL)
+      CL_CHECK(clEnqueueWriteBuffer(ocl->command_queue, mem_potentials, CL_FALSE, offset * sizeof(fcs_float), nlocal * sizeof(fcs_float), potentials, 0, NULL, NULL));
+
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
+
+    // write keys to buffer
+    CL_CHECK(clEnqueueWriteBuffer(queue, mem_keys, CL_FALSE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
+    // fill up the front with zeros
+    const int zero = 0;
+    CL_CHECK(clEnqueueFillBuffer(queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
 
     // let it finish for timing
     CL_CHECK(T_CL_FINISH(queue));
@@ -860,9 +923,9 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_scan_paste, 1, sizeof(cl_mem), &mem_histograms_sum));
 #endif
 
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 4, sizeof(cl_mem), &mem_histograms));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(histogram_t) * FCS_NEAR_OCL_SORT_RADIX * local_size_reorder, NULL));
-  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(int), &n));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 2, sizeof(cl_mem), &mem_histograms));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 3, sizeof(histogram_t) * FCS_NEAR_OCL_SORT_RADIX * local_size_reorder, NULL));
+  CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 5, sizeof(int), &n));
 
   // calculate the amount of passes from the datatype of keys
   int pass_max = (sizeof(sort_key_t) * 8) / FCS_NEAR_OCL_SORT_RADIX_BITS;
@@ -876,8 +939,10 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   // set transpose arguments
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 0, sizeof(cl_mem), &mem_keys));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 1, sizeof(cl_mem), &mem_keys_swap));
+#if FCS_NEAR_OCL_SORT_USE_INDEX
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 2, sizeof(cl_mem), &mem_index));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 3, sizeof(cl_mem), &mem_index_swap));
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 4, sizeof(sort_key_t) * transpose_tilesize * transpose_tilesize, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 5, sizeof(sort_key_t) * transpose_tilesize * transpose_tilesize, NULL));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 6, sizeof(int), &transpose_cols));
@@ -895,14 +960,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   }
   
   // and swap buffers
-  {
-    cl_mem mem_tmp = mem_keys;
-    mem_keys = mem_keys_swap;
-    mem_keys_swap = mem_tmp;
-    mem_tmp = mem_index;
-    mem_index = mem_index_swap;
-    mem_index_swap = mem_tmp;
-  }
+  RADIX_SWAP();
 #endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
 
   // start passes for radix
@@ -974,9 +1032,34 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     // 4. reorder
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 0, sizeof(cl_mem), &mem_keys));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 1, sizeof(cl_mem), &mem_keys_swap));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 2, sizeof(cl_mem), &mem_index));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 3, sizeof(cl_mem), &mem_index_swap));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 6, sizeof(int), &pass));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 4, sizeof(int), &pass));
+#if FCS_NEAR_OCL_SORT_USE_INDEX
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 6, sizeof(cl_mem), &mem_index));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(cl_mem), &mem_index_swap));
+#else // FCS_NEAR_OCL_SORT_USE_INDEX
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 6, sizeof(cl_mem), &mem_positions));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 7, sizeof(cl_mem), &mem_positions_swap));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 8, sizeof(cl_mem), &mem_charges));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 9, sizeof(cl_mem), &mem_charges_swap));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 10, sizeof(cl_mem), &mem_indices));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 11, sizeof(cl_mem), &mem_indices_swap));
+    if(field != NULL) {
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 12, sizeof(cl_mem), &mem_field));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 13, sizeof(cl_mem), &mem_field_swap));
+    }
+    else {
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 12, sizeof(cl_mem), NULL));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 13, sizeof(cl_mem), NULL));
+    }
+    if(potentials != NULL) {
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 14, sizeof(cl_mem), &mem_potentials));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 15, sizeof(cl_mem), &mem_potentials_swap));
+    }
+    else {
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 14, sizeof(cl_mem), NULL));
+      CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_reorder, 15, sizeof(cl_mem), NULL));
+    }
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
 
     CL_CHECK(clEnqueueNDRangeKernel(queue, ocl->sort_kernel_radix_reorder, 1, NULL, &global_size_reorder, &local_size_reorder, 0, NULL, &ocl->sort_kernel_completion));
     if(do_wait) {
@@ -984,20 +1067,17 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
       T_KERNEL(45, ocl->sort_kernel_completion, "radix_reorder");
     }
     // swap the swap buffers
-    cl_mem mem_tmp = mem_keys;
-    mem_keys = mem_keys_swap;
-    mem_keys_swap = mem_tmp;
-    mem_tmp = mem_index;
-    mem_index = mem_index_swap;
-    mem_index_swap = mem_tmp;
+    RADIX_SWAP();
   }
   // transpose matrices back when transpose is used
 #if FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
   // set transpose arguments
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 0, sizeof(cl_mem), &mem_keys));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 1, sizeof(cl_mem), &mem_keys_swap));
+#if FCS_NEAR_OCL_SORT_USE_INDEX
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 2, sizeof(cl_mem), &mem_index));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 3, sizeof(cl_mem), &mem_index_swap));
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 6, sizeof(int), &transpose_rows));
   CL_CHECK(clSetKernelArg(ocl->sort_kernel_radix_transpose, 7, sizeof(int), &transpose_cols));
 
@@ -1012,14 +1092,7 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     T_KERNEL(46, ocl->sort_kernel_completion, "radix_transpose");
   }
   // and swap buffers
-  {
-    cl_mem mem_tmp = mem_keys;
-    mem_keys = mem_keys_swap;
-    mem_keys_swap = mem_tmp;
-    mem_tmp = mem_index;
-    mem_index = mem_index_swap;
-    mem_index_swap = mem_tmp;
-  }
+  RADIX_SWAP();
 #endif // FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE
 
   // let the whole radix sort finish up
@@ -1052,10 +1125,12 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
   // check for early return
   if(only_sort) {
     // hand back the correct buffers
+#if FCS_NEAR_OCL_SORT_USE_INDEX
     *ext_mem_keys       = mem_keys;
     *ext_mem_keys_swap  = mem_keys_swap;
     *ext_mem_index      = mem_index;
     *ext_mem_index_swap = mem_index_swap;
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
     // end the story right here.
     return;
   }
@@ -1070,17 +1145,36 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
 
   // release unneeded buffers
   CL_CHECK(clReleaseMemObject(mem_keys));
+
+#if FCS_NEAR_OCL_SORT_USE_INDEX
+  // recreate the sub index because the buffer may have been swapped
   CL_CHECK(clReleaseMemObject(mem_keys_swap));
   CL_CHECK(clReleaseMemObject(mem_index_swap));
-
-  // recreate the sub index because the buffer may have been swapped
   CL_CHECK(clReleaseMemObject(mem_index_sub));
   mem_index_sub = CL_CHECK_ERR(clCreateSubBuffer(mem_index, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &index_region, &_err));
   fcs_ocl_sort_move_data(ocl, nlocal, offset, mem_index_sub, positions, charges, indices, field, potentials);
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
 
   // destroy remaining buffers
+#if FCS_NEAR_OCL_SORT_USE_INDEX
   CL_CHECK(clReleaseMemObject(mem_index));
   CL_CHECK(clReleaseMemObject(mem_index_sub));
+#else // FCS_NEAR_OCL_SORT_USE_INDEX
+  CL_CHECK(clReleaseMemObject(mem_positions));
+  CL_CHECK(clReleaseMemObject(mem_positions_swap));
+  CL_CHECK(clReleaseMemObject(mem_charges));
+  CL_CHECK(clReleaseMemObject(mem_charges_swap));
+  CL_CHECK(clReleaseMemObject(mem_indices));
+  CL_CHECK(clReleaseMemObject(mem_indices_swap));
+  if(field != NULL) {
+    CL_CHECK(clReleaseMemObject(mem_field));
+    CL_CHECK(clReleaseMemObject(mem_field_swap));
+  }
+  if(potentials != NULL) {
+    CL_CHECK(clReleaseMemObject(mem_potentials));
+    CL_CHECK(clReleaseMemObject(mem_potentials_swap));
+  }
+#endif // FCS_NEAR_OCL_SORT_USE_INDEX
 }
 
 
