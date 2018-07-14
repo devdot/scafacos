@@ -913,7 +913,8 @@ static void fcs_ocl_sort_radix(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_t
     CL_CHECK(clEnqueueWriteBuffer(queue, mem_keys, CL_FALSE, offset * sizeof(sort_key_t), nlocal * sizeof(sort_key_t), keys, 0, NULL, NULL));
     // fill up the front with zeros
     const int zero = 0;
-    CL_CHECK(clEnqueueFillBuffer(queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
+    if(offset > 0)
+      CL_CHECK(clEnqueueFillBuffer(queue, mem_keys, &zero, sizeof(zero), 0, offset * sizeof(sort_key_t), 0, NULL, NULL));
 
     // let it finish for timing
     CL_CHECK(T_CL_FINISH(queue));
@@ -2191,7 +2192,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     cl_buffer_region sampleRegion = {localSampleTotalN2Offset * sizeof(sort_key_t), localSampleTotal * sizeof(sort_key_t)};
     mem_local_samples = CL_CHECK_ERR(clCreateSubBuffer(mem_local_samples_n2, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &sampleRegion, &_err));
     // fill with zeros as usual
-    CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_local_samples_n2, &zero, sizeof(zero), 0, localSampleTotalN2Offset * sizeof(sort_key_t), 0, NULL, NULL));
+    if(localSampleTotalN2Offset > 0)
+      CL_CHECK(clEnqueueFillBuffer(ocl->command_queue, mem_local_samples_n2, &zero, sizeof(zero), 0, localSampleTotalN2Offset * sizeof(sort_key_t), 0, NULL, NULL));
 
     // check for optimizing
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES | FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
