@@ -90,6 +90,7 @@ typedef struct
 
   cl_ulong global_memory;
   cl_ulong local_memory;
+  cl_uint base_addr_align;
 
   cl_program sort_program_bitonic;
   cl_kernel sort_kernel_bitonic_global_2;

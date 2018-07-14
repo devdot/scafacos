@@ -836,6 +836,9 @@ static fcs_int fcs_ocl_near_init(fcs_ocl_context_t *ocl, fcs_int nunits, fcs_ocl
   clGetDeviceInfo(device_id, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(ocl->local_memory), &ocl->local_memory, NULL);
   clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(ocl->global_memory), &ocl->global_memory, NULL);
 
+  // query base address
+  CL_CHECK(clGetDeviceInfo(device_id, CL_DEVICE_MEM_BASE_ADDR_ALIGN , sizeof(ocl->base_addr_align), &ocl->base_addr_align, NULL));
+
   // set values to initial settings
   ocl->buffers_on_device = 0;
   ocl->buffers_on_device_ghost = 0;

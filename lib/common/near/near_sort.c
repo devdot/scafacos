@@ -2389,9 +2389,16 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 5, sizeof(cl_mem), &mem_bucketInnerOffsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 6, sizeof(cl_mem), &mem_bucketContainerOffsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 7, sizeof(int), &workgroupSortNum));
-  #if FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 8, sizeof(int), &radixLocalSize));
-  #endif // FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX
+#if FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX
+    int * __radixLocalSize = (int*) &radixLocalSize;
+#if !FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+    // if strict subbuffers are active, check if local size is multiple of address align base
+    if(*__radixLocalSize % ocl->base_addr_align)
+      *__radixLocalSize += ocl->base_addr_align - (*__radixLocalSize % ocl->base_addr_align);
+#endif // !FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
+    // set the param
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 8, sizeof(int), __radixLocalSize));
+#endif // FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX
 
     // now run the prefix sum
     INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-bucket: #7 prefix sum (%ld groups each %ld items, scan quota %d)\n", global_size_columns / local_size_columns, local_size_columns, quota););
