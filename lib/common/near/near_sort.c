@@ -1696,8 +1696,8 @@ static inline void fcs_ocl_sort_hybrid_core(fcs_ocl_context_t *ocl, cl_command_q
   }
 }
 
-static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int use_index, const size_t n, size_t* local_size_local, size_t* bytesPerElement, int* quota, int* workgroupElementsNum) {
-  *local_size_local = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
+static inline void fcs_ocl_sort_hybrid_params(fcs_ocl_context_t *ocl, const int use_index, const size_t n, size_t* local_size_local, size_t* bytesPerElement, int* quota, int* workgroupElementsNum, const int workgroupMax) {
+  *local_size_local = workgroupMax;
   *bytesPerElement = sizeof(sort_key_t);
 #if !FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL
   if(use_index)
@@ -1761,7 +1761,7 @@ static void fcs_ocl_sort_hybrid(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   size_t bytesPerElement;
   unsigned int quota;
   unsigned int workgroupElementsNum;
-  fcs_ocl_sort_hybrid_params(ocl, (FCS_NEAR_OCL_SORT_USE_INDEX || onlySort), n, &local_size_local, &bytesPerElement, &quota, &workgroupElementsNum);
+  fcs_ocl_sort_hybrid_params(ocl, (FCS_NEAR_OCL_SORT_USE_INDEX || onlySort), n, &local_size_local, &bytesPerElement, &quota, &workgroupElementsNum, FCS_NEAR_OCL_SORT_HYBRID_WORKGROUP_MAX);
 
   size_t global_size_local = n / quota;
   const size_t global_size_global = n/2;
@@ -2039,7 +2039,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   size_t bytesPerElement;
   unsigned int workgroupSortQuota;
 
-  fcs_ocl_sort_hybrid_params(ocl, 1, n, &workgroupSortLocalSize, &bytesPerElement, &workgroupSortQuota, &workgroupSortSize);
+  fcs_ocl_sort_hybrid_params(ocl, 1, n, &workgroupSortLocalSize, &bytesPerElement, &workgroupSortQuota, &workgroupSortSize, FCS_NEAR_OCL_SORT_WORKGROUP_MAX);
 
 #if FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET
   // just round up to fill the groups
@@ -2602,7 +2602,7 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
       unsigned int workgroupSortSize;
 
       // get params
-      fcs_ocl_sort_hybrid_params(ocl, 1, n, &local_size, &bytesPerElement, &quota, &workgroupSortSize);
+      fcs_ocl_sort_hybrid_params(ocl, 1, n, &local_size, &bytesPerElement, &quota, &workgroupSortSize, FCS_NEAR_OCL_SORT_HYBRID_WORKGROUP_MAX);
       const size_t global_size = n / quota;
 
       // set bucket-specific args
