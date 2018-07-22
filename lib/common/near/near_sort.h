@@ -65,7 +65,7 @@ extern "C" {
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_WORKGROUP_MAX  256 // should not be higher than FCS_NEAR_OCL_SORT_WORKGROUP_MAX
 #define FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA      2
-#define FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA      -1 // -1 for none
+#define FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA      2 // -1 for none
 #define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL   0
 #define FCS_NEAR_OCL_SORT_HYBRID_COALESCE       1
 #define FCS_NEAR_OCL_SORT_HYBRID_PAIRWISE       0
