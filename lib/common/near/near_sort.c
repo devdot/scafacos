@@ -2887,6 +2887,10 @@ void fcs_ocl_sort(fcs_near_t* near) {
       printf("ocl-sort-timing-ghost: %s %f\n", ocl->timing_names[i], ocl->timing_ghost[i]);
   }
 #endif // DO_TIMING
+
+#if FCS_NEAR_OCL_SORT_ABORT
+  abort();
+#endif // FCS_NEAR_OCL_SORT_ABORT
 }
 
 

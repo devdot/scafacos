@@ -32,6 +32,7 @@ extern "C" {
  * TOGGLES
  */
 
+#define FCS_NEAR_OCL_SORT_ABORT               0 // aborts the programm after sorting is done (obviously use only for debugging/timing)
 #define FCS_NEAR_OCL_SORT_USE_INDEX           1
 #define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0
 #define FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO     1
