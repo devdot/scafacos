@@ -1,8 +1,27 @@
+/*
+  Copyright (C) 2018 Thomas Schaller
+  
+  This file is part of ScaFaCoS.
+  
+  ScaFaCoS is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Lesser Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+  
+  ScaFaCoS is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Lesser Public License for more details.
+  
+  You should have received a copy of the GNU Lesser Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 // bitonic sort kernel for sorting the maximum amount of local storage
 // this kernel is supposed to be fit by local memory size, not thread-to-element rate
 
 // IMPORTANT: quota is assumed to be 2 or a power of 2
-// quota is: number of sorting elements in workgroup / number of threads in workgroup
+// quota is: number of sort elements per workitem OR: (number of sorting elements in workgroup) / (number of threads in workgroup) 
 
 typedef void HERE_COMES_THE_CODE;
 
