@@ -1,8 +1,8 @@
 /*
   Copyright (C) 2018 Thomas Schaller
-  
+
   This file is part of ScaFaCoS.
-  
+
   ScaFaCoS is free software: you can redistribute it and/or modify
   it under the terms of the GNU Lesser Public License as published by
   the Free Software Foundation, either version 3 of the License, or
@@ -12,7 +12,7 @@
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
   GNU Lesser Public License for more details.
-  
+
   You should have received a copy of the GNU Lesser Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
@@ -29,9 +29,10 @@ __kernel void bucket_sample(__global const key_t* keys, int dist, __global key_t
 
 // kernel for indexing of global samples
 // returns the next bigger element when the searched sample was not found
+// based on left-most binary search
 // global size: matrix size = buckets * sort groups
 // local size: buckets
-__kernel void bucket_index_samples(__global key_t* keysGlobal, __global const key_t* samples, __global int* offsets, __global int* sizes, const int groupSize
+__kernel void bucket_index_samples(__global key_t* keysGlobal, __global const key_t* samples, __global int* matrixPartitionOffset, __global int* matrixPartitionSize, const int groupSize
 #if BUCKET_INDEXER_LOCAL
 	, __local key_t* buffer
 #endif // BUCKET_INDEXER_LOCAL
@@ -42,8 +43,8 @@ __kernel void bucket_index_samples(__global key_t* keysGlobal, __global const ke
 	size_t group_id = get_group_id(0);
 	
 	int matrixRow = local_size * group_id;
-	offsets += matrixRow;
-	sizes += matrixRow;
+	matrixPartitionOffset += matrixRow;
+	matrixPartitionSize += matrixRow;
 
 
 	// load elements into buffer if necessary
@@ -98,21 +99,22 @@ __kernel void bucket_index_samples(__global key_t* keysGlobal, __global const ke
 	pos = r;
 
 	// write our result back
-	offsets[local_id] = (pos != -1) ? pos : r+1;
+	matrixPartitionOffset[local_id] = (pos != -1) ? pos : r+1;
 
-	// now calculate sizes
+	// now calculate matrixPartitionSize
 	barrier(CLK_GLOBAL_MEM_FENCE);
 	if(local_id != local_size - 1)
-		sizes[local_id] = offsets[local_id + 1] - offsets[local_id];
+		matrixPartitionSize[local_id] = matrixPartitionOffset[local_id + 1] - matrixPartitionOffset[local_id];
 	else
 		// next element would be at position groupSize
-		sizes[local_id] = groupSize - offsets[local_id];
+		matrixPartitionSize[local_id] = groupSize - matrixPartitionOffset[local_id];
 }
 
+// calculate column prefix sum on matrixPartitionSize that was previously calculated by indexer
 // one group per column (bucket)
 // quota has to be 2 or power of 2 (if it's one, up to half of all workitems won't do any work)
 // matrix is [m x b], where m is sort groups (subarrays) and b is buckets
-__kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsigned int quota) {
+__kernel void bucket_prefix_columns(__global int* matrixPartitionSize, const int rows, unsigned int quota) {
 	// each thread will do one column
 	size_t group_id = get_group_id(0);
 	size_t local_id = get_local_id(0);
@@ -127,7 +129,7 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 	int offset = n - rows;
 
 	// first, shift matrix to our column
-	matrix += group_id;
+	matrixPartitionSize += group_id;
 
 	// now divide quota by two (when possible)
 	// this can be done because the scan needs only one thread per two items, no need to simulate the upper half of threads
@@ -147,7 +149,7 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 
 				// only add when were not in offset, bi is always greater than ai
 				if(ai >= 0)
-					matrix[bi * cols] += matrix[ai * cols];
+					matrixPartitionSize[bi * cols] += matrixPartitionSize[ai * cols];
 			}
 			// go to next local id in quota
 			local_id += local_size;
@@ -175,7 +177,7 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 
 				// check if ai is negative, if so we don't need to do anything
 				if(ai >= 0) {
-					matrix[bi * cols] += matrix[ai * cols];
+					matrixPartitionSize[bi * cols] += matrixPartitionSize[ai * cols];
 				}
 			}
 		}
@@ -183,8 +185,9 @@ __kernel void bucket_prefix_columns(__global int* matrix, const int rows, unsign
 	}
 }
 
+// calculate result row of the column prefix sum (of partition sizes) that was calculated before
 // one thread per column
-__kernel void bucket_prefix_final(__global const int* matrix,
+__kernel void bucket_prefix_final(__global const int* matrixPartitionSize,
 	__local unsigned int* row,
 	__local unsigned int* bufferContainerPrefix,
 	__global unsigned int* bucketPos,
@@ -201,10 +204,10 @@ __kernel void bucket_prefix_final(__global const int* matrix,
 	int cols = get_local_size(0);
 
 	// offset the matrix to it's last row
-	matrix += (rows - 1) * cols;
+	matrixPartitionSize += (rows - 1) * cols;
 
 	// load data
-	row[i] = matrix[i];
+	row[i] = matrixPartitionSize[i];
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// we got the sizes of each bucket in row
@@ -273,7 +276,7 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 	const int bucketsNum,
 	__local int*  bufferPartitionOffset,
 	__global int* matrixPartitionOffset,
-	__global int* matrixBucketOffset,
+	__global int* matrixBucketPartitionOffset,
 	__global int* bucketContainerInnerOffsets,
 	__global int* bucketContainerOffsets
 ) {
@@ -289,7 +292,7 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 
 	// offset matrices
 	matrixPartitionOffset += group_id * bucketsNum;
-	matrixBucketOffset += (group_id - 1) * bucketsNum;
+	matrixBucketPartitionOffset += (group_id - 1) * bucketsNum;
 
 	// load partition prefix into local memory
 	int i = local_id;
@@ -325,10 +328,11 @@ __kernel void bucket_relocate(__global key_t* keysIn,
 
 
 		// calculate the offset of this element in the bucket arrays
-		bucketOffset = bucketContainerInnerOffsets[bucket] + bucketContainerOffsets[bucket]; // TODO calc in local
+		// these calculation maybe should be done at the start and then stored in local memory?
+		bucketOffset = bucketContainerInnerOffsets[bucket] + bucketContainerOffsets[bucket];
 		bucketOffset += local_id - bufferPartitionOffset[bucket];
 		// rows in this matrix are offset by one
-		bucketOffset += (group_id == 0) ? 0 : matrixBucketOffset[bucket];
+		bucketOffset += (group_id == 0) ? 0 : matrixBucketPartitionOffset[bucket];
 
 		// now we got both offsets, just copy
 		keysOut[bucketOffset] = keysIn[local_id];

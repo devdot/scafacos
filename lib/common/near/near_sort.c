@@ -2355,8 +2355,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 
   // step #6 sample indexing
   T_START(16, "sample_indexing");
-  cl_mem mem_sample_matrix_offsets;
-  cl_mem mem_sample_matrix_prefix;
+  cl_mem mem_sample_matrix_partition_offsets;
+  cl_mem mem_sample_matrix_partition_prefix;
   unsigned int sampleMatrixSize;
   {
     sampleMatrixSize = workgroupSortNum * globalSampleNum;
@@ -2364,14 +2364,14 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     const size_t local_size  = globalSampleNum;
 
     // create buffers
-    mem_sample_matrix_offsets = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sampleMatrixSize * sizeof(int), NULL, &_err));
-    mem_sample_matrix_prefix  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sampleMatrixSize * sizeof(int), NULL, &_err));
+    mem_sample_matrix_partition_offsets = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sampleMatrixSize * sizeof(int), NULL, &_err));
+    mem_sample_matrix_partition_prefix  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE, sampleMatrixSize * sizeof(int), NULL, &_err));
     
     // set kernel args
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 0, sizeof(cl_mem), &mem_keys));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 1, sizeof(cl_mem), &mem_samples));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 2, sizeof(cl_mem), &mem_sample_matrix_offsets));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 3, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 2, sizeof(cl_mem), &mem_sample_matrix_partition_offsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 3, sizeof(cl_mem), &mem_sample_matrix_partition_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 4, sizeof(workgroupSortSize), &workgroupSortSize));
 #if FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_index_samples, 5, sizeof(sort_key_t) * workgroupSortSize, NULL));
@@ -2418,11 +2418,11 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     mem_bucketContainerOffsets  = CL_CHECK_ERR(clCreateBuffer(ocl->context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, globalSampleNum * sizeof(int), bucketContainerOffsets, &_err));
 
     // set kernel arguments
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 0, sizeof(cl_mem), &mem_sample_matrix_partition_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 1, sizeof(int), &workgroupSortNum));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_columns, 2, sizeof(int), &quota));
 
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 0, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 0, sizeof(cl_mem), &mem_sample_matrix_partition_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 1, globalSampleNum * sizeof(int), NULL));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 2, globalSampleNum * sizeof(int), NULL));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_prefix_final, 3, sizeof(cl_mem), &mem_bucketPositions));
@@ -2562,8 +2562,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 4, sizeof(workgroupSortQuota), &workgroupSortQuota));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 5, sizeof(globalSampleNum), &globalSampleNum));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 6, globalSampleNum * sizeof(int), NULL));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_sample_matrix_offsets));
-    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 8, sizeof(cl_mem), &mem_sample_matrix_prefix));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 7, sizeof(cl_mem), &mem_sample_matrix_partition_offsets));
+    CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 8, sizeof(cl_mem), &mem_sample_matrix_partition_prefix));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 9, sizeof(cl_mem), &mem_bucketInnerOffsets));
     CL_CHECK(clSetKernelArg(ocl->sort_kernel_bucket_relocate, 10, sizeof(cl_mem), &mem_bucketContainerOffsets));
 
@@ -2597,8 +2597,8 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
   CL_CHECK(clReleaseMemObject(mem_samples));
   CL_CHECK(clReleaseMemObject(mem_bucketInnerOffsets));
   CL_CHECK(clReleaseMemObject(mem_bucketContainerOffsets));
-  CL_CHECK(clReleaseMemObject(mem_sample_matrix_offsets));
-  CL_CHECK(clReleaseMemObject(mem_sample_matrix_prefix));
+  CL_CHECK(clReleaseMemObject(mem_sample_matrix_partition_offsets));
+  CL_CHECK(clReleaseMemObject(mem_sample_matrix_partition_prefix));
   // keys are now split into buckets, aren't needed anymore (data index is required for moving data)
   CL_CHECK(clReleaseMemObject(mem_keys));
 
