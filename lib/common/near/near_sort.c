@@ -128,6 +128,13 @@ static const char* fcs_ocl_cl_sort_radix =
  */
 
 #ifdef DO_CHECK
+/**
+ * @brief Check if the given array of keys is in order.
+ * 
+ * @param n size_t Number of keys in the array
+ * @param keys sort_key_t* Array of keys.
+ * @return int Will return one on success, else abort
+ */
 static int fcs_ocl_sort_check(size_t n, sort_key_t* keys) {
   // check the sort results to be correct
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: check sort\n"););
@@ -141,6 +148,17 @@ static int fcs_ocl_sort_check(size_t n, sort_key_t* keys) {
   return 1;
 }
 
+/**
+ * @brief Function to check the index values were swapped correctly.
+ * 
+ * @param ocl fcs_ocl_context_t* Context that was used for sorting the associated keys
+ * @param n size_t Number of keys that were sorted (including offset)
+ * @param original_keys sort_key_t* Array of the keys befor they were sorted
+ * @param offset size_t Number of elements that were filled for sorting
+ * @param mem_keys cl_mem* The sorted key puffer on the device
+ * @param mem_index cl_mem* The index that is associated to the sorted keys on device.
+ * @return int Will return 1 on success, else abort
+ */
 static int fcs_ocl_sort_check_index(fcs_ocl_context_t* ocl, size_t n, sort_key_t* original_keys, size_t offset, cl_mem* mem_keys, cl_mem* mem_index) {
   // check if the index maps back to the original keys
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: check index\n"););
@@ -165,7 +183,12 @@ static int fcs_ocl_sort_check_index(fcs_ocl_context_t* ocl, size_t n, sort_key_t
   return 1;
 }
 #endif
-
+/**
+ * @brief Rounds to the next power of 2 when it's not a power of 2 already
+ * 
+ * @param n size_t Number that is to be rounded
+ * @return size_t Power of 2 that is >= n
+ */
 size_t fcs_ocl_helper_next_power_of_2(size_t n) {
   unsigned count = 0;
 
@@ -180,7 +203,12 @@ size_t fcs_ocl_helper_next_power_of_2(size_t n) {
  
   return 1 << count;
 }
-
+/**
+ * @brief Rounds to the previous power of 2 when it's not a power of 2 already
+ * 
+ * @param n size_t Number that is to be rounded
+ * @return size_t Power of 2 that is <= n
+ */
 size_t fcs_ocl_helper_prev_power_of_2(size_t n) {
   unsigned count = 0;
 
@@ -345,6 +373,19 @@ void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t 
   T_STOP(24);
 }
 
+/**
+ * @brief Move the particle data according to the data index.
+ * 
+ * @param ocl fcs_ocl_context_t* Context that was used to sort the keys
+ * @param nlocal size_t Amount of particles
+ * @param offset size_t Amount of elements that were filled for sorting
+ * @param mem_index cl_mem Puffer of the data index on device
+ * @param positions fcs_float* Positions of the particles, stored as triples
+ * @param charges fcs_float* Charges of the particles
+ * @param indices fcs_gridsort_index_t* Gridsort index values of the particles
+ * @param field fcs_float* Field of the particles, stored as triples
+ * @param potentials fcs_float* Potentials of the particles
+ */
 void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
 {
 #if FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
@@ -2745,9 +2786,14 @@ static void fcs_ocl_sort_bucket(fcs_ocl_context_t *ocl, size_t nlocal, sort_key_
 }
 
 /*
- * entry functions into ocl sort
+ * entry function into ocl sort
  */
 
+/**
+ * @brief Sort the particles and ghosts into their associated boxes
+ * 
+ * @param near fcs_near_t* Near field solver object
+ */
 void fcs_ocl_sort(fcs_near_t* near) {
   fcs_ocl_context_t* ocl = &near->context->ocl;
   INFO_CMD(printf(INFO_PRINT_PREFIX "ocl-sort: start\n"););

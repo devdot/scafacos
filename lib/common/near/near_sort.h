@@ -103,8 +103,9 @@ extern "C" {
 #endif
 
 /**
- * @brief sort particles, ghost particles and associated data into boxes using OpenCl
- * @param fcs_near_t* near field solver object
+ * @brief Sort the particles and ghosts into their associated boxes
+ * 
+ * @param near fcs_near_t* Near field solver object
  */
 void fcs_ocl_sort(fcs_near_t* near);
 
