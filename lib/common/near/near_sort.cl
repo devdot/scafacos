@@ -22,6 +22,8 @@ typedef void HERE_COMES_THE_CODE;
 #define USE_INDEX 0
 #endif
 
+#if !USE_INDEX
+
 // generic swap on global array
 #define swap_data_global(i, j, array, type) { swap_data(array[i], array[j], type); }
 
@@ -57,6 +59,7 @@ static void inline swap_data_all_global(int i, int j,
     if(potentials != NULL)
         swap_data_global(i, j, potentials, fcs_float);
 }
+#endif // !USE_INDEX
 
 #if USE_INDEX
 
