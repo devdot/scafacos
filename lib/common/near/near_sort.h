@@ -29,31 +29,31 @@ extern "C" {
 #if FCS_NEAR_OCL_SORT
 
 /*
- * TOGGLES
+ * TOGGLES AND CONFIGURATION
  */
 
 #define FCS_NEAR_OCL_SORT_ABORT               0 // aborts the programm after sorting is done (obviously use only for debugging/timing)
-#define FCS_NEAR_OCL_SORT_USE_INDEX           1
-#define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0
-#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO     1
-#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 32 // 2^25, only when moving data on gpu
-#define FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL    1
-#define FCS_NEAR_OCL_SORT_KEEP_BUFFERS        1 // set to 1 if buffers should stay on device for ocl compute
-#define FCS_NEAR_OCL_SORT_USE_SUBBUFFERS      1 // needs to be 0 for most CPUs
+#define FCS_NEAR_OCL_SORT_USE_INDEX           1   // set 0 for using swap along, 1 for data index
+#define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0   // 1 if data should only be moved on host (only applies to data index)
+#define FCS_NEAR_OCL_SORT_MOVE_AUTO           1   // 1 for automatic usage of split move when the defined limit is reached
+#define FCS_NEAR_OCL_SORT_MOVE_SPLIT_N        1024 * 1024 * 32 // 2^25, threshold until data will be moved all at the same time, only when moving data on gpu without auto-mode
+#define FCS_NEAR_OCL_SORT_NO_SWAP_ON_EQUAL    1   // set to 0 if comparisons should not check for equal exception
+#define FCS_NEAR_OCL_SORT_KEEP_BUFFERS        1   // set to 1 if buffers should stay on device for ocl compute
+#define FCS_NEAR_OCL_SORT_USE_SUBBUFFERS      1   // will use OpenCL Subbuffers only for most important cases if 0, needs to be 0 for most CPUs
 
 #define FCS_NEAR_OCL_DATA_INDEX_IS_INT        0
 #define FCS_NEAR_OCL_DATA_INDEX_IS_LONG_LONG  1
 #define FCS_NEAR_OCL_SORT_HISTOGRAM_IS_INT        1
 #define FCS_NEAR_OCL_SORT_HISTOGRAM_IS_LONG_LONG  0
 
-#define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024
-#define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64
+#define FCS_NEAR_OCL_SORT_WORKGROUP_MAX 1024  // should not be higher than the workgroup max the the device
+#define FCS_NEAR_OCL_SORT_WORKGROUP_MIN 64    // for very small number of elements this limit may be violated
 
 // configuration for radix sort
 #define FCS_NEAR_OCL_SORT_RADIX_BITS      3
-#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     16
-#define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1 // only when quota > 1 !!
-#define FCS_NEAR_OCL_SORT_RADIX_SCALE     1
+#define FCS_NEAR_OCL_SORT_RADIX_QUOTA     16  // amout of sort items per workitem
+#define FCS_NEAR_OCL_SORT_RADIX_TRANSPOSE 1   // only when quota > 1 !!
+#define FCS_NEAR_OCL_SORT_RADIX_SCALE     1   // 1 to activate multilevel scan
 // radix is automatic
 #define FCS_NEAR_OCL_SORT_RADIX (1 << FCS_NEAR_OCL_SORT_RADIX_BITS)
 
@@ -65,22 +65,22 @@ extern "C" {
 
 // configuration for hybrid sort
 #define FCS_NEAR_OCL_SORT_HYBRID_WORKGROUP_MAX  256 // should not be higher than FCS_NEAR_OCL_SORT_WORKGROUP_MAX
-#define FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA      2
-#define FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA      2 // -1 for none
-#define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL   0
-#define FCS_NEAR_OCL_SORT_HYBRID_COALESCE       1
-#define FCS_NEAR_OCL_SORT_HYBRID_PAIRWISE       0
+#define FCS_NEAR_OCL_SORT_HYBRID_MIN_QUOTA      2   // minimum quota (number of elements per workitem), must be power of 2 and >= 2
+#define FCS_NEAR_OCL_SORT_HYBRID_MAX_QUOTA      2   // maximum quota, must be power of 2, -1 for none
+#define FCS_NEAR_OCL_SORT_HYBRID_INDEX_GLOBAL   0   // set to 1 if the local kernel should keep data index in global memory
+#define FCS_NEAR_OCL_SORT_HYBRID_COALESCE       1   // set to 0 if the local kernel should not coalesce memory reads
+#define FCS_NEAR_OCL_SORT_HYBRID_PAIRWISE       0   // set to 1 if the local kernel should do pairwise swaps (requires lots of sychronization)
 
 // configuration for bucket sort
-#define FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX        0
-#define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1
-#define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    1
-#define FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES    32
-#define FCS_NEAR_OCL_SORT_BUCKET_GLOBAL_SAMPLES   64
-#define FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET       1
+#define FCS_NEAR_OCL_SORT_BUCKET_USE_RADIX        0   // if this is 1, bucket sort will use radix for sorting the buckets
+#define FCS_NEAR_OCL_SORT_BUCKET_MULTIQUEUE       1   // set to 0 to deactivate the usage of multiqueue for sorting the buckts
+#define FCS_NEAR_OCL_SORT_BUCKET_INDEXER_LOCAL    1   // set to 0 if the indexer kernel should not work on local memory
+#define FCS_NEAR_OCL_SORT_BUCKET_LOCAL_SAMPLES    8  // local sample rate, must be power of 2
+#define FCS_NEAR_OCL_SORT_BUCKET_GLOBAL_SAMPLES   128  // global sample rate, is number of buckets, must be power of 2
+#define FCS_NEAR_OCL_SORT_BUCKET_MIN_OFFSET       1   // minimize the offset of bucket sort (may cause problems with sampling that can be solved with other optimizations)
 // set only either to true
-#define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES     0
-#define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET  0
+#define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES     1   // set to 1 to skew sampling area so that number of zero-samples is reduced
+#define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET  0   // set to 1 to manipulate sample selection so that all zero-elements are put in the first bucket that is then discarded
 
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES && FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
 #error Cannot enable both optimizations at once

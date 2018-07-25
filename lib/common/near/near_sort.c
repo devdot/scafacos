@@ -255,9 +255,9 @@ void fcs_ocl_sort_move_data_host(fcs_ocl_context_t *ocl, size_t nlocal, size_t o
 #undef MOVE_DATA
 #undef MOVE_DATA_TRIPLE
 
-#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#if FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_AUTO
 #define fcs_ocl_sort_move_data fcs_ocl_sort_move_data_host
-#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#else // FCS_NEAR_OCL_SORT_MOVE_ON_HOST && !FCS_NEAR_OCL_SORT_MOVE_AUTO
 
 
 void fcs_ocl_sort_move_data_split(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset, cl_mem mem_index, fcs_float *positions, fcs_float *charges, fcs_gridsort_index_t *indices, fcs_float *field, fcs_float *potentials)
@@ -352,7 +352,7 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
   offset = 0;
 #endif // FCS_NEAR_OCL_SORT_USE_SUBBUFFERS
 
-#if FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#if FCS_NEAR_OCL_SORT_MOVE_AUTO
   // calculate where the data can be moved based on global size
   size_t buffer_size;
   // use the index buffer as reference of actual size on device
@@ -390,7 +390,7 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
   }
   // fits all into global memory!
 
-#else // FCS_NEAR_OCL_SORT_MOVE_SPLIT_AUTO
+#else // FCS_NEAR_OCL_SORT_MOVE_AUTO
   if(nlocal >= FCS_NEAR_OCL_SORT_MOVE_SPLIT_N) {
     fcs_ocl_sort_move_data_split(ocl, nlocal, offset, mem_index, positions, charges, indices, field, potentials);
     return;
