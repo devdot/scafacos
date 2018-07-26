@@ -84,12 +84,12 @@ extern "C" {
 
 // configuration for auto-mode
 #define FCS_NEAR_OCL_SORT_AUTO_LOW_ALGO         4                 // use hybrid for smaller n
-#define FCS_NEAR_OCL_SORT_AUTO_MAIN_ALGO        6                 // use bucket as main algorithm
-#define FCS_NEAR_OCL_SORT_AUTO_HIGH_ALGO        5                 // use radix for high n
+#define FCS_NEAR_OCL_SORT_AUTO_MAIN_ALGO        5                 // use bucket as main algorithm
+#define FCS_NEAR_OCL_SORT_AUTO_HIGH_ALGO        6                 // use radix for high n
 #define FCS_NEAR_OCL_SORT_AUTO_SCALE_ALGO       4                 // use hybrid again when radix can't do it anymore
 #define FCS_NEAR_OCL_SORT_AUTO_MAIN_THRESHOLD   (1 << 22)         // 2^22, just above 24^3 * 300 and below 25^3 * 300
 #define FCS_NEAR_OCL_SORT_AUTO_HIGH_THRESHOLD   (76*76*76) * 300  // 76^3 * 300 is the last we can confidently do (just below 2^27)
-#define FCS_NEAR_OCL_SORT_AUTO_SCALE_THRESHOLD  (86*86*86) * 300  // 86^3 * 300 is the last that radix can do for sure
+#define FCS_NEAR_OCL_SORT_AUTO_SCALE_THRESHOLD  (85*85*85) * 300  // 85^3 * 300 is the last that radix can do for sure
 
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES && FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
 #error Cannot enable both optimizations at once
