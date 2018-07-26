@@ -32,7 +32,7 @@ extern "C" {
  * TOGGLES AND CONFIGURATION
  */
 
-#define FCS_NEAR_OCL_SORT_ABORT               0 // aborts the programm after sorting is done (obviously use only for debugging/timing)
+#define FCS_NEAR_OCL_SORT_ABORT               0   // aborts the programm after sorting is done (obviously use only for debugging/timing)
 #define FCS_NEAR_OCL_SORT_USE_INDEX           1   // set 0 for using swap along, 1 for data index
 #define FCS_NEAR_OCL_SORT_MOVE_ON_HOST        0   // 1 if data should only be moved on host (only applies to data index)
 #define FCS_NEAR_OCL_SORT_MOVE_AUTO           1   // 1 for automatic usage of split move when the defined limit is reached
@@ -82,6 +82,15 @@ extern "C" {
 #define FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES     1   // set to 1 to skew sampling area so that number of zero-samples is reduced
 #define FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET  0   // set to 1 to manipulate sample selection so that all zero-elements are put in the first bucket that is then discarded
 
+// configuration for auto-mode
+#define FCS_NEAR_OCL_SORT_AUTO_LOW_ALGO         4                 // use hybrid for smaller n
+#define FCS_NEAR_OCL_SORT_AUTO_MAIN_ALGO        6                 // use bucket as main algorithm
+#define FCS_NEAR_OCL_SORT_AUTO_HIGH_ALGO        5                 // use radix for high n
+#define FCS_NEAR_OCL_SORT_AUTO_SCALE_ALGO       4                 // use hybrid again when radix can't do it anymore
+#define FCS_NEAR_OCL_SORT_AUTO_MAIN_THRESHOLD   (1 << 22)         // 2^22, just above 24^3 * 300 and below 25^3 * 300
+#define FCS_NEAR_OCL_SORT_AUTO_HIGH_THRESHOLD   (76*76*76) * 300  // 76^3 * 300 is the last we can confidently do (just below 2^27)
+#define FCS_NEAR_OCL_SORT_AUTO_SCALE_THRESHOLD  (86*86*86) * 300  // 86^3 * 300 is the last that radix can do for sure
+
 #if FCS_NEAR_OCL_SORT_BUCKET_SKEW_SAMPLES && FCS_NEAR_OCL_SORT_BUCKET_OPTIMIZE_OFFSET
 #error Cannot enable both optimizations at once
 #endif
@@ -91,10 +100,9 @@ extern "C" {
 #endif
 
 // enum for algo types
-#define FCS_NEAR_OCL_SORT_ALGO_BITONIC        1
-#define FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX  2
-#define FCS_NEAR_OCL_SORT_ALGO_HYBRID         3
-#define FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX   4
+#define FCS_NEAR_OCL_SORT_ALGO_AUTO           0
+#define FCS_NEAR_OCL_SORT_ALGO_BITONIC        2
+#define FCS_NEAR_OCL_SORT_ALGO_HYBRID         4
 #define FCS_NEAR_OCL_SORT_ALGO_BUCKET         5
 #define FCS_NEAR_OCL_SORT_ALGO_RADIX          6
 

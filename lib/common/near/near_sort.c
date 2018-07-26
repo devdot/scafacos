@@ -2815,6 +2815,24 @@ void fcs_ocl_sort(fcs_near_t* near) {
   }
 #endif // FCS_NEAR_OCL_SORT_KEEP_BUFFERS
 
+  // check if the auto mode algorithm is used
+  if(near->near_param.ocl_sort_algo == FCS_NEAR_OCL_SORT_ALGO_AUTO) {
+    // we need to find the next matching algorithm based on number of particles
+    if(near->nparticles <= FCS_NEAR_OCL_SORT_AUTO_MAIN_THRESHOLD) {
+      near->near_param.ocl_sort_algo = FCS_NEAR_OCL_SORT_AUTO_LOW_ALGO;
+    }
+    else if(near->nparticles <= FCS_NEAR_OCL_SORT_AUTO_HIGH_THRESHOLD) {
+      near->near_param.ocl_sort_algo = FCS_NEAR_OCL_SORT_AUTO_MAIN_ALGO;
+    }
+    else if(near->nparticles <= FCS_NEAR_OCL_SORT_AUTO_SCALE_THRESHOLD) {
+      near->near_param.ocl_sort_algo = FCS_NEAR_OCL_SORT_AUTO_HIGH_ALGO;
+    }
+    else {
+      near->near_param.ocl_sort_algo = FCS_NEAR_OCL_SORT_AUTO_SCALE_ALGO;
+    }
+    INFO_CMD(printf(INFO_PRINT_PREFIX "auto-mode: chose algo %d\n", near->near_param.ocl_sort_algo););
+  }
+
   T_START(0, "sum");
   T_START(1, "sum_prepare");
   switch(near->near_param.ocl_sort_algo)
@@ -2823,11 +2841,9 @@ void fcs_ocl_sort(fcs_near_t* near) {
       fcs_ocl_sort_radix_prepare(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
-    case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
       fcs_ocl_sort_bitonic_prepare(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
-    case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
       fcs_ocl_sort_hybrid_prepare(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BUCKET:
@@ -2850,11 +2866,9 @@ void fcs_ocl_sort(fcs_near_t* near) {
       fcs_ocl_sort_radix(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials, NULL, NULL, NULL, NULL, NULL, NULL);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
-    case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
       fcs_ocl_sort_bitonic(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
-    case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
       fcs_ocl_sort_hybrid(ocl, near->nparticles, near->context->real_boxes, near->positions, near->charges, near->indices, near->field, near->potentials, NULL, NULL);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BUCKET:
@@ -2876,11 +2890,9 @@ void fcs_ocl_sort(fcs_near_t* near) {
         fcs_ocl_sort_radix(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL,  NULL, NULL, NULL, NULL, NULL, NULL);
         break;
       case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
-      case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
         fcs_ocl_sort_bitonic(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL);
         break;
       case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
-      case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
         fcs_ocl_sort_hybrid(ocl, near->nghosts, near->context->ghost_boxes, near->ghost_positions, near->ghost_charges, near->ghost_indices, NULL, NULL, NULL, NULL);
         break;
       case FCS_NEAR_OCL_SORT_ALGO_BUCKET:
@@ -2901,11 +2913,9 @@ void fcs_ocl_sort(fcs_near_t* near) {
       fcs_ocl_sort_radix_release(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BITONIC:
-    case FCS_NEAR_OCL_SORT_ALGO_BITONIC_INDEX:
       fcs_ocl_sort_bitonic_release(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_HYBRID:
-    case FCS_NEAR_OCL_SORT_ALGO_HYBRID_INDEX:
       fcs_ocl_sort_hybrid_release(ocl);
       break;
     case FCS_NEAR_OCL_SORT_ALGO_BUCKET:
