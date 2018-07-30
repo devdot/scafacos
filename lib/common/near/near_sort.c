@@ -518,8 +518,8 @@ void fcs_ocl_sort_move_data(fcs_ocl_context_t *ocl, size_t nlocal, size_t offset
 #if FCS_NEAR_OCL_SORT_KEEP_BUFFERS
   if(ocl->buffers_on_device != -1) {
     // so we should keep the buffers on the device
-    // check if we are ghosts (we know that when the buffers for normal particles are already on the device)
-    if(ocl->buffers_on_device == 1) {
+    // check if we are ghosts
+    if(ocl->is_ghosts) {
       // we are ghost particles
       ocl->mem_gpositions = mem_positionsOut;
       ocl->mem_gcharges   = mem_chargesOut;
@@ -2882,6 +2882,7 @@ void fcs_ocl_sort(fcs_near_t* near) {
 
   // check for ghost boxes
   if(near->context->ghost_boxes) {
+    ocl->is_ghosts = 1;
     ocl->_timing = ocl->timing_ghost;
     T_START(3, "sum_sort");
     switch(near->near_param.ocl_sort_algo)

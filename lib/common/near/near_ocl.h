@@ -85,6 +85,7 @@ typedef struct
 #if FCS_NEAR_OCL_SORT
   int buffers_on_device;
   int buffers_on_device_ghost;
+  int is_ghosts;
 
   cl_device_id device_id;
 
