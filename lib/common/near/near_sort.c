@@ -656,14 +656,14 @@ static void fcs_ocl_sort_radix_release(fcs_ocl_context_t *ocl) {
 
 static inline void fcs_ocl_sort_radix_params(fcs_ocl_context_t* ocl, const size_t nlocal, size_t* local_size) {
   // calculate local size dependent on nlocal and context
-  *local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX;
-
+  *local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MAX * FCS_NEAR_OCL_SORT_RADIX_QUOTA;
+  
   // auto scale for normal groups
-  if(nlocal / 4 < FCS_NEAR_OCL_SORT_WORKGROUP_MAX) {
-      *local_size = fcs_ocl_helper_next_power_of_2(nlocal / 8);
+  if(nlocal / (FCS_NEAR_OCL_SORT_RADIX_QUOTA * 4) < FCS_NEAR_OCL_SORT_WORKGROUP_MAX * FCS_NEAR_OCL_SORT_RADIX_QUOTA) {
+      *local_size = fcs_ocl_helper_next_power_of_2(nlocal / (FCS_NEAR_OCL_SORT_RADIX_QUOTA * 8));
 
-      if(*local_size < FCS_NEAR_OCL_SORT_WORKGROUP_MIN)
-        *local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN;
+      if(*local_size < FCS_NEAR_OCL_SORT_WORKGROUP_MIN * FCS_NEAR_OCL_SORT_RADIX_QUOTA)
+        *local_size = FCS_NEAR_OCL_SORT_WORKGROUP_MIN * FCS_NEAR_OCL_SORT_RADIX_QUOTA;
   }
 
   // downscale to fit local memory
