@@ -40,7 +40,6 @@ __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* 
 
     // amount of keys that are analyzed by this workitem
     int quota = n / workgroups / local_workitems;
-    int offset = global_id * quota;
 
     // set local histograms to zero
     for(int i = 0; i < RADIX; i++)
@@ -57,7 +56,7 @@ __kernel void radix_histogram(const __global key_t* keys, __global histogram_t* 
     int index = global_id;
     const int indexIncrement = workgroups * local_workitems;
 #else
-    int index = offset;
+    int index = global_id * quota;;
     const int indexIncrement = 1;
 #endif // RADIX_TRANSPOSE
 
@@ -179,7 +178,6 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
     int local_workitems = get_local_size(0);
 
     int quota = n / workgroups / local_workitems;
-    int offset = global_id * quota;
 
     // write histogram to local buffer
     for(int i = 0; i < RADIX; i++)
@@ -198,7 +196,7 @@ __kernel void radix_reorder(const __global key_t* keysIn, __global key_t* keysOu
     for(int q = quota; (q & 1) == 0; q >>= 1)
         quotaExponent++;
 #else
-    int index = offset;
+    int index = global_id * quota;
     const int indexIncrement = 1;
 #endif // RADIX_TRANSPOSE
 
