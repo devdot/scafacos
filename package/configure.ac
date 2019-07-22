@@ -1,5 +1,5 @@
 AC_PREREQ([2.59])
-AC_INIT([ScaFaCoS], [0.9], [scafacos-dvlp@fz-juelich.de], [scafacos],
+AC_INIT([ScaFaCoS], [m4_esyscmd_s([cat ../VERSION])], [scafacos@googlegroups.com], [scafacos],
   [http://www.scafacos.de])
 m4_ifndef([AC_PACKAGE_URL],
 	  [AC_SUBST([PACKAGE_URL], [http://www.scafacos.de])])
@@ -33,7 +33,7 @@ AX_FCS_ENABLE_SINGLE_LIB
 # List of all solvers.
 m4_define([all_solver_methods], [direct ewald fmm memd mmm1d mmm2d p2nfft p3m pepc pp3mg vmg wolf])
 
-m4_define([all_common_methods], [near gridsort resort fcs_common mmm pnfft pfft fftw3_mpi_common fftw3_common fftw3_mpi fftw3])
+m4_define([all_common_methods], [near gridsort redist resort fcs_common mmm pnfft pfft fftw3_mpi_common fftw3_common fftw3_mpi fftw3])
 
 # Determine enabled solvers.
 AC_ARG_ENABLE([fcs-package-solvers],[],[],[enable_fcs_package_solvers="all_solver_methods"])
@@ -185,6 +185,7 @@ AC_SUBST([SCAFACOS_MK_LIBS_A])
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([scafacos.pc])
 AC_CONFIG_FILES([scafacos.mk])
+AC_CONFIG_FILES([scafacosConfig.cmake])
 
 AC_OUTPUT
 
